@@ -7,6 +7,7 @@ from zope.interface import implementer
 from configparser import ConfigParser as Parser
 import configparser as ConfigParser
 
+import os
 from os.path import expanduser
 
 from twisted import plugin
@@ -36,19 +37,19 @@ class ConfigAdapter(object):
 
     def get(self, key, D=None):
         try:
-            return self._C.get(self._S, key)
+            return self._C.get(self._S, key, vars=dict(os.environ))
         except ConfigParser.NoOptionError:
             return D
 
     def getboolean(self, key, D=None):
         try:
-            return self._C.getboolean(self._S, key)
+            return self._C.getboolean(self._S, key, vars=dict(os.environ))
         except (ConfigParser.NoOptionError, ValueError):
             return D
 
     def __getitem__(self, key):
         try:
-            return self._C.get(self._S, key)
+            return self._C.get(self._S, key, vars=dict(os.environ))
         except ConfigParser.NoOptionError:
             raise KeyError("No option value")
 
@@ -73,7 +74,7 @@ class ProcessorController(service.MultiService):
         elif not parser.has_section("recceiver"):
             parser.add_section("recceiver")
 
-        pnames = parser.get("recceiver", "procs").split(",")
+        pnames = parser.get('recceiver', 'procs', vars=dict(os.environ)).split(',')
 
         plugs = {}
 
