@@ -17,7 +17,7 @@ Clean and poll on recsync start:
     - polling completes
 4. CF will clean
 5. Check result
-    - all channels inactive
+    - all records inactive
 
 Clean and poll on recsync close:
 1. CF on
@@ -30,7 +30,7 @@ Clean and poll on recsync close:
     - (NYI) will give up if waiting too long
 6. CF on
 7. Check result
-    - all channels inactive
+    - all records inactive
 
 Commit poll on IOC start:
 1. Enable CF
@@ -43,33 +43,33 @@ Commit poll on IOC start:
 5. Enable CF
 6. Commit poll fails once, reconnects, and commits
 7. Check result
-    - all channels active
+    - all records active
 
 Commit poll on IOC close:
 1. Enable CF
 2. Start Recsync
 3. Start IOC
 4. Wait for IOC to connect and commit
-    - all IOC channels now active
+    - all IOC records now active
 5. Disable CF
 6. Close IOC
     - commits [] and polls
 7. Enable CF
     - reconnects after polling and completes commit
 8. Check result
-    - all channels inactive
+    - all records inactive
 
 100 IOCs overlapping 1 IOC:
 0. * Disable logging in demo.conf *
 1. Enable CF
 2. Start recsync
 3. Start st.cmd in a command prompt
-    - IOC will connect and commit channels
-    - 4 channels will be active
+    - IOC will connect and commit records
+    - 4 records will be active
 4. run test_mock_iocs.py
     - wait forever
-    - all channels will be active
-    - 2 channels will still belong to st.cmd
+    - all records will be active
+    - 2 records will still belong to st.cmd
 5. kill test_mock_iocs.py or killall st_test.cmd
     - wait forever again
-    - 4 channels will be active, all belonging to st.cmd
+    - 4 records will be active, all belonging to st.cmd

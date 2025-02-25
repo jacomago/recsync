@@ -9,9 +9,9 @@ client = ChannelFinderClient()
 
 
 def get_cf_data(client):
-    channels = client.findByArgs([("pvStatus", "Active")])
+    records = client.findByArgs([("pvStatus", "Active")])
 
-    for ch in channels:
+    for ch in records:
         ch.pop("owner", None)
         ch.pop("tags", None)
         for prop in ch["properties"]:
@@ -20,18 +20,18 @@ def get_cf_data(client):
             if prop["name"] == "iocName":
                 ch["iocName"] = prop["value"]
         ch.pop("properties", None)
-    return channels
+    return records
 
 
-channels = get_cf_data(client)
+records = get_cf_data(client)
 
 if os.path.isfile(filename):
     os.remove(filename)
 
 new_list = []
 
-for channel in channels:
-    new_list.append([channel["name"], channel["hostName"], int(channel["iocName"])])
+for record in records:
+    new_list.append([record["name"], record["hostName"], int(record["iocName"])])
 
 new_list.sort(key=itemgetter(0))
 
