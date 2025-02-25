@@ -467,7 +467,7 @@ def __updateCF__(
     iocs = processor.iocs
     conf = processor.conf
     recceiverid = conf.get(RECCEIVERID_KEY, RECCEIVERID_DEFAULT)
-    new = set(recordInfoByName.keys())
+    new_records = set(recordInfoByName.keys())
 
     if iocid in iocs:
         hostName = iocs[iocid]["hostname"]
@@ -487,14 +487,14 @@ def __updateCF__(
     records = []
     """A list of records in channelfinder with the associated hostName and iocName"""
     _log.debug("Find existing records by IOCID: {iocid}".format(iocid=iocid))
-    old = client.findByArgs(prepareFindArgs(conf, [("iocid", iocid)]))
+    old_records = client.findByArgs(prepareFindArgs(conf, [("iocid", iocid)]))
     if processor.cancelled:
         raise defer.CancelledError()
 
-    if old is not None:
-        for cf_record in old:
+    if old_records is not None:
+        for cf_record in old_records:
             if (
-                len(new) == 0 or cf_record["name"] in records_to_delete
+                len(new_records) == 0 or cf_record["name"] in records_to_delete
             ):  # case: empty commit/del, remove all reference to ioc
                 if cf_record["name"] in records_dict:
                     cf_record["owner"] = iocs[records_dict[cf_record["name"]][-1]][
@@ -609,7 +609,7 @@ def __updateCF__(
                                     )
                                 )
             else:
-                if cf_record["name"] in new:  # case: record in old and new
+                if cf_record["name"] in new_records:  # case: record in old and new
                     """
                     Channel exists in Channelfinder with same hostname and iocname.
                     Update the status to ensure it is marked active and update the time.
@@ -625,7 +625,7 @@ def __updateCF__(
                     _log.debug(
                         "Add existing record with same IOC: {s}".format(s=records[-1])
                     )
-                    new.remove(cf_record["name"])
+                    new_records.remove(cf_record["name"])
 
                     """In case, alias exist"""
                     if conf.get("alias", "default") == "on":
@@ -634,7 +634,7 @@ def __updateCF__(
                             and "aliases" in recordInfoByName[cf_record["name"]]
                         ):
                             for alias in recordInfoByName[cf_record["name"]]["aliases"]:
-                                if alias in old:
+                                if alias in old_records:
                                     """alias exists in old list"""
                                     alias["properties"] = __merge_property_lists(
                                         [
@@ -652,7 +652,7 @@ def __updateCF__(
                                         alias["properties"],
                                     )
                                     records.append(alias)
-                                    new.remove(alias["name"])
+                                    new_records.remove(alias["name"])
                                 else:
                                     """alias exists but not part of old list"""
                                     aprops = __merge_property_lists(
@@ -682,7 +682,7 @@ def __updateCF__(
                                             "properties": aprops,
                                         }
                                     )
-                                    new.remove(alias["name"])
+                                    new_records.remove(alias["name"])
                                 _log.debug(
                                     "Add existing alias with same IOC: {s}".format(
                                         s=records[-1]
@@ -698,7 +698,7 @@ def __updateCF__(
     """
     searchStrings = []
     searchString = ""
-    for record_name in new:
+    for record_name in new_records:
         if not searchString:
             searchString = record_name
         elif len(searchString) + len(record_name) < 600:
@@ -720,7 +720,7 @@ def __updateCF__(
         if processor.cancelled:
             raise defer.CancelledError()
 
-    for record_name in new:
+    for record_name in new_records:
         newProps = create_properties(
             owner, iocTime, recceiverid, hostName, iocName, iocIP, iocid
         )
@@ -801,7 +801,7 @@ def __updateCF__(
     if len(records) != 0:
         client.set(channels=records)
     else:
-        if old and len(old) != 0:
+        if old_records and len(old_records) != 0:
             client.set(channels=records)
     if processor.cancelled:
         raise defer.CancelledError()
