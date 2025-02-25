@@ -818,7 +818,7 @@ def prepareFindArgs(conf, args, size=0):
 
 
 def poll(
-    update,
+    update_method,
     processor,
     pvInfoByName,
     records_to_delete,
@@ -834,7 +834,7 @@ def poll(
     success = False
     while not success:
         try:
-            update(
+            update_method(
                 processor,
                 pvInfoByName,
                 records_to_delete,
