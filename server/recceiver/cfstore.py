@@ -26,8 +26,8 @@ _log = logging.getLogger(__name__)
 # source_address = source address
 # records_to_add = records ein added ( recname, rectype, {key:val})
 # records_to_delete = a set() of records which are being removed
-# infos = dictionary of client infos
-# recinfos = additional infos being added to existing records
+# client_infos = dictionary of client client_infos
+# recinfos = additional client_infos being added to existing records
 # "recid: {key:value}"
 #
 
@@ -204,11 +204,11 @@ class CFProcessor(service.Service):
 
         host = TR.source_address.host
         port = TR.source_address.port
-        iocName = TR.infos.get("IOCNAME") or TR.source_address.port
-        hostName = TR.infos.get("HOSTNAME") or TR.source_address.host
+        iocName = TR.client_infos.get("IOCNAME") or TR.source_address.port
+        hostName = TR.client_infos.get("HOSTNAME") or TR.source_address.host
         owner = (
-            TR.infos.get("ENGINEER")
-            or TR.infos.get("CF_USERNAME")
+            TR.client_infos.get("ENGINEER")
+            or TR.client_infos.get("CF_USERNAME")
             or self.conf.get("username", "cfstore")
         )
         time = self.currentTime(timezone=self.conf.get("timezone"))
@@ -253,11 +253,11 @@ class CFProcessor(service.Service):
 
         for rid in pvInfo:
             for epics_env_var_name, cf_prop_name in self.env_vars.items():
-                if TR.infos.get(epics_env_var_name) is not None:
+                if TR.client_infos.get(epics_env_var_name) is not None:
                     property = {
                         "name": cf_prop_name,
                         "owner": owner,
-                        "value": TR.infos.get(epics_env_var_name),
+                        "value": TR.client_infos.get(epics_env_var_name),
                     }
                     if "infoProperties" not in pvInfo[rid]:
                         pvInfo[rid]["infoProperties"] = list()
