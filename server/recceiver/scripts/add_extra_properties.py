@@ -1,7 +1,7 @@
 from channelfinder import ChannelFinderClient
 
 """
-Simple script for adding active channels to Channel Finder Service for testing cf-store clean
+Simple script for adding active records to Channel Finder Service for testing cf-store clean
 If it gives a 500 error, run it again. Glassfish and CFS must be set up and running.
 """
 
@@ -25,7 +25,7 @@ def abbr(name, hostname, iocname, status):
 
 client = ChannelFinderClient()
 client.set(
-    channels=[
+    records=[
         abbr("ch1", "testhosta", 1111, "Active"),
         abbr("test_channel", "testhosta", 1111, "Active"),
     ]
