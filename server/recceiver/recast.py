@@ -221,7 +221,7 @@ class Transaction(object):
         self.initial = False
         self.source_address = ep
         self.srcid = id
-        self.addrec, self.infos, self.recinfos = {}, {}, {}
+        self.records_to_add, self.infos, self.recinfos = {}, {}, {}
         self.aliases = collections.defaultdict(list)
         self.records_to_delete = set()
 
@@ -235,7 +235,7 @@ class Transaction(object):
         init = self.initial
         conn = self.connected
         nenv = len(self.infos)
-        nadd = len(self.addrec)
+        nadd = len(self.records_to_add)
         ndel = len(self.records_to_delete)
         ninfo = len(self.recinfos)
         nalias = len(self.aliases)
@@ -308,7 +308,7 @@ class CollectionSession(object):
         if self.T and self.T <= time.time():
             self.flush()
         elif self.trlimit and self.trlimit <= (
-            len(self.TR.addrec) + len(self.TR.records_to_delete)
+            len(self.TR.records_to_add) + len(self.TR.records_to_delete)
         ):
             self.flush()
 
@@ -326,7 +326,7 @@ class CollectionSession(object):
 
     def addRecord(self, rid, rtype, rname):
         self.flushSafely()
-        self.TR.addrec[rid] = (rname, rtype)
+        self.TR.records_to_add[rid] = (rname, rtype)
         self.markDirty()
 
     def addAlias(self, rid, rname):
@@ -335,7 +335,7 @@ class CollectionSession(object):
 
     def delRecord(self, rid):
         self.flushSafely()
-        self.TR.addrec.pop(rid, None)
+        self.TR.records_to_add.pop(rid, None)
         self.TR.records_to_delete.add(rid)
         self.TR.recinfos.pop(rid, None)
         self.markDirty()

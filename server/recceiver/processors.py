@@ -166,8 +166,10 @@ class ShowProcessor(service.Service):
         if not trans.connected:
             _log.info("#  connection lost")
         for item in trans.infos.items():
-            _log.info(" epicsEnvSet('{name}','{value}')".format(name=item[0], value=item[1]))
-        for rid, (rname, rtype) in trans.addrec.items():
+            _log.info(
+                " epicsEnvSet('{name}','{value}')".format(name=item[0], value=item[1])
+            )
+        for rid, (rname, rtype) in trans.records_to_add.items():
             _log.info(' record({rtype}, "{rname}") {{'.format(rtype=rtype, rname=rname))
             for alias in trans.aliases.get(rid, []):
                 _log.info('  alias("{alias}")'.format(alias=alias))
