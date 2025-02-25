@@ -185,7 +185,7 @@ class ShowProcessor(service.Service):
             _log.info(
                 " epicsEnvSet('{name}','{value}')".format(name=item[0], value=item[1])
             )
-        for rid, (rname, rtype) in trans.addrec.items():
+        for rid, (rname, rtype) in trans.records_to_add.items():
             _log.info(' record({rtype}, "{rname}") {{'.format(rtype=rtype, rname=rname))
             for alias in trans.aliases.get(rid, []):
                 _log.info('  alias("{alias}")'.format(alias=alias))

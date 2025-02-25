@@ -24,7 +24,7 @@ _log = logging.getLogger(__name__)
 # ITRANSACTION FORMAT:
 #
 # source_address = source address
-# addrec = records ein added ( recname, rectype, {key:val})
+# records_to_add = records ein added ( recname, rectype, {key:val})
 # records_to_delete = a set() of records which are being removed
 # infos = dictionary of client infos
 # recinfos = additional infos being added to existing records
@@ -217,7 +217,7 @@ class CFProcessor(service.Service):
         iocid = host + ":" + str(port)
 
         pvInfo = {}
-        for rid, (rname, rtype) in TR.addrec.items():
+        for rid, (rname, rtype) in TR.records_to_add.items():
             pvInfo[rid] = {"pvName": rname}
             if self.conf.get("recordType"):
                 pvInfo[rid]["recordType"] = rtype
