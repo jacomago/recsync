@@ -227,10 +227,10 @@ class CFProcessor(service.Service):
         iocid = host + ":" + str(port)
 
         recordInfo = {}
-        for record_id, (rname, rtype) in transaction.records_to_add.items():
-            recordInfo[record_id] = {"pvName": rname}
+        for record_id, (record_name, record_type) in transaction.records_to_add.items():
+            recordInfo[record_id] = {"pvName": record_name}
             if self.conf.get("recordType"):
-                recordInfo[record_id]["recordType"] = rtype
+                recordInfo[record_id]["recordType"] = record_type
         for record_id, (record_infos_to_add) in transaction.record_infos_to_add.items():
             # find intersection of these sets
             if record_id not in recordInfo:
