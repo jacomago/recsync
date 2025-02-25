@@ -374,8 +374,8 @@ class CFProcessor(service.Service):
 
     def clean_channels(self, owner, records):
         new_channels = []
-        for ch in records or []:
-            new_channels.append(ch["name"])
+        for cf_record in records or []:
+            new_channels.append(cf_record["name"])
         _log.info(
             "Total channels to update: {nChannels}".format(nChannels=len(new_channels))
         )
@@ -449,39 +449,44 @@ def __updateCF__(
         raise defer.CancelledError()
 
     if old is not None:
-        for ch in old:
+        for cf_record in old:
             if (
-                len(new) == 0 or ch["name"] in records_to_delete
+                len(new) == 0 or cf_record["name"] in records_to_delete
             ):  # case: empty commit/del, remove all reference to ioc
-                if ch["name"] in records_dict:
-                    ch["owner"] = iocs[records_dict[ch["name"]][-1]]["owner"]
-                    ch["properties"] = __merge_property_lists(
+                if cf_record["name"] in records_dict:
+                    cf_record["owner"] = iocs[records_dict[cf_record["name"]][-1]][
+                        "owner"
+                    ]
+                    cf_record["properties"] = __merge_property_lists(
                         ch_create_properties(
-                            owner, iocTime, recceiverid, records_dict, iocs, ch
+                            owner, iocTime, recceiverid, records_dict, iocs, cf_record
                         ),
-                        ch["properties"],
+                        cf_record["properties"],
                     )
                     if conf.get("recordType"):
-                        ch["properties"] = __merge_property_lists(
-                            ch["properties"].append(
+                        cf_record["properties"] = __merge_property_lists(
+                            cf_record["properties"].append(
                                 {
                                     "name": "recordType",
                                     "owner": owner,
-                                    "value": iocs[records_dict[ch["name"]][-1]][
+                                    "value": iocs[records_dict[cf_record["name"]][-1]][
                                         "recordType"
                                     ],
                                 }
                             ),
-                            ch["properties"],
+                            cf_record["properties"],
                         )
-                    records.append(ch)
+                    records.append(cf_record)
                     _log.debug(
                         "Add existing record to previous IOC: {s}".format(s=records[-1])
                     )
                     """In case alias exist, also delete them"""
                     if conf.get("alias"):
-                        if ch["name"] in pvInfoByName and "aliases" in pvInfoByName[ch["name"]]:
-                            for a in pvInfoByName[ch["name"]]["aliases"]:
+                        if (
+                            cf_record["name"] in pvInfoByName
+                            and "aliases" in pvInfoByName[cf_record["name"]]
+                        ):
+                            for a in pvInfoByName[cf_record["name"]]["aliases"]:
                                 if a["name"] in records_dict:
                                     a["owner"] = iocs[records_dict[a["name"]][-1]][
                                         "owner"
@@ -493,22 +498,24 @@ def __updateCF__(
                                             recceiverid,
                                             records_dict,
                                             iocs,
-                                            ch,
+                                            cf_record,
                                         ),
                                         a["properties"],
                                     )
                                     if conf.get("recordType", "default") == "on":
-                                        ch["properties"] = __merge_property_lists(
-                                            ch["properties"].append(
-                                                {
-                                                    "name": "recordType",
-                                                    "owner": owner,
-                                                    "value": iocs[
-                                                        records_dict[a["name"]][-1]
-                                                    ]["recordType"],
-                                                }
-                                            ),
-                                            ch["properties"],
+                                        cf_record["properties"] = (
+                                            __merge_property_lists(
+                                                cf_record["properties"].append(
+                                                    {
+                                                        "name": "recordType",
+                                                        "owner": owner,
+                                                        "value": iocs[
+                                                            records_dict[a["name"]][-1]
+                                                        ]["recordType"],
+                                                    }
+                                                ),
+                                                cf_record["properties"],
+                                            )
                                         )
                                     records.append(a)
                                     _log.debug(
@@ -519,21 +526,24 @@ def __updateCF__(
 
                 else:
                     """Orphan the record : mark as inactive, keep the old hostName and iocName"""
-                    ch["properties"] = __merge_property_lists(
+                    cf_record["properties"] = __merge_property_lists(
                         [
                             {"name": "pvStatus", "owner": owner, "value": "Inactive"},
                             {"name": "time", "owner": owner, "value": iocTime},
                         ],
-                        ch["properties"],
+                        cf_record["properties"],
                     )
-                    records.append(ch)
+                    records.append(cf_record)
                     _log.debug(
                         "Add orphaned record with no IOC: {s}".format(s=records[-1])
                     )
                     """Also orphan any alias"""
                     if conf.get("alias", "default") == "on":
-                        if ch["name"] in pvInfoByName and "aliases" in pvInfoByName[ch["name"]]:
-                            for a in pvInfoByName[ch["name"]]["aliases"]:
+                        if (
+                            cf_record["name"] in pvInfoByName
+                            and "aliases" in pvInfoByName[cf_record["name"]]
+                        ):
+                            for a in pvInfoByName[cf_record["name"]]["aliases"]:
                                 a["properties"] = __merge_property_lists(
                                     [
                                         {
@@ -556,28 +566,31 @@ def __updateCF__(
                                     )
                                 )
             else:
-                if ch["name"] in new:  # case: record in old and new
+                if cf_record["name"] in new:  # case: record in old and new
                     """
                     Channel exists in Channelfinder with same hostname and iocname.
                     Update the status to ensure it is marked active and update the time.
                     """
-                    ch["properties"] = __merge_property_lists(
+                    cf_record["properties"] = __merge_property_lists(
                         [
                             {"name": "pvStatus", "owner": owner, "value": "Active"},
                             {"name": "time", "owner": owner, "value": iocTime},
                         ],
-                        ch["properties"],
+                        cf_record["properties"],
                     )
-                    records.append(ch)
+                    records.append(cf_record)
                     _log.debug(
                         "Add existing record with same IOC: {s}".format(s=records[-1])
                     )
-                    new.remove(ch["name"])
+                    new.remove(cf_record["name"])
 
                     """In case, alias exist"""
                     if conf.get("alias", "default") == "on":
-                        if ch["name"] in pvInfoByName and "aliases" in pvInfoByName[ch["name"]]:
-                            for a in pvInfoByName[ch["name"]]["aliases"]:
+                        if (
+                            cf_record["name"] in pvInfoByName
+                            and "aliases" in pvInfoByName[cf_record["name"]]
+                        ):
+                            for a in pvInfoByName[cf_record["name"]]["aliases"]:
                                 if a in old:
                                     """alias exists in old list"""
                                     a["properties"] = __merge_property_lists(
@@ -614,10 +627,10 @@ def __updateCF__(
                                             {
                                                 "name": "alias",
                                                 "owner": owner,
-                                                "value": ch["name"],
+                                                "value": cf_record["name"],
                                             },
                                         ],
-                                        ch["properties"],
+                                        cf_record["properties"],
                                     )
                                     records.append(
                                         {
@@ -657,10 +670,10 @@ def __updateCF__(
         _log.debug(
             "Find existing records by name: {search}".format(search=eachSearchString)
         )
-        for ch in client.findByArgs(
+        for cf_record in client.findByArgs(
             prepareFindArgs(conf, [("~name", eachSearchString)])
         ):
-            existingChannels[ch["name"]] = ch
+            existingChannels[cf_record["name"]] = cf_record
         if processor.cancelled:
             raise defer.CancelledError()
 
@@ -750,15 +763,15 @@ def create_properties(owner, iocTime, recceiverid, hostName, iocName, iocIP, ioc
     ]
 
 
-def ch_create_properties(owner, iocTime, recceiverid, records_dict, iocs, ch):
+def ch_create_properties(owner, iocTime, recceiverid, records_dict, iocs, cf_record):
     return create_properties(
         owner,
         iocTime,
         recceiverid,
-        iocs[records_dict[ch["name"]][-1]]["hostname"],
-        iocs[records_dict[ch["name"]][-1]]["iocname"],
-        iocs[records_dict[ch["name"]][-1]]["iocIP"],
-        records_dict[ch["name"]][-1],
+        iocs[records_dict[cf_record["name"]][-1]]["hostname"],
+        iocs[records_dict[cf_record["name"]][-1]]["iocname"],
+        iocs[records_dict[cf_record["name"]][-1]]["iocIP"],
+        records_dict[cf_record["name"]][-1],
     )
 
 
