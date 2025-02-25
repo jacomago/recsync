@@ -165,7 +165,7 @@ class ShowProcessor(service.Service):
         )
         if not trans.connected:
             _log.info("#  connection lost")
-        for item in trans.infos.items():
+        for item in trans.client_infos.items():
             _log.info(
                 " epicsEnvSet('{name}','{value}')".format(name=item[0], value=item[1])
             )

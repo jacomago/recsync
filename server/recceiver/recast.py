@@ -221,7 +221,7 @@ class Transaction(object):
         self.initial = False
         self.source_address = ep
         self.srcid = id
-        self.records_to_add, self.infos, self.recinfos = {}, {}, {}
+        self.records_to_add, self.client_infos, self.recinfos = {}, {}, {}
         self.aliases = collections.defaultdict(list)
         self.records_to_delete = set()
 
@@ -234,7 +234,7 @@ class Transaction(object):
         )
         init = self.initial
         conn = self.connected
-        nenv = len(self.infos)
+        nenv = len(self.client_infos)
         nadd = len(self.records_to_add)
         ndel = len(self.records_to_delete)
         ninfo = len(self.recinfos)
@@ -321,7 +321,7 @@ class CollectionSession(object):
         self.flush()
 
     def iocInfo(self, key, val):
-        self.TR.infos[key] = val
+        self.TR.client_infos[key] = val
         self.markDirty()
 
     def addRecord(self, rid, rtype, rname):
@@ -342,11 +342,11 @@ class CollectionSession(object):
 
     def recInfo(self, rid, key, val):
         try:
-            infos = self.TR.recinfos[rid]
+            client_infos = self.TR.recinfos[rid]
         except KeyError:
-            infos = {}
-            self.TR.recinfos[rid] = infos
-        infos[key] = val
+            client_infos = {}
+            self.TR.recinfos[rid] = client_infos
+        client_infos[key] = val
         self.markDirty()
 
 
