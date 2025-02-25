@@ -422,7 +422,7 @@ def dict_to_file(dict, iocs, conf):
 
 
 def __updateCF__(
-    proc,
+    processor,
     pvInfoByName,
     records_to_delete,
     hostName,
@@ -434,11 +434,11 @@ def __updateCF__(
 ):
     _log.info("CF Update IOC: {iocid}".format(iocid=iocid))
 
-    # Consider making this function a class methed then 'proc' simply becomes 'self'
-    client = proc.client
-    channels_dict = proc.channel_dict
-    iocs = proc.iocs
-    conf = proc.conf
+    # Consider making this function a class methed then 'processor' simply becomes 'self'
+    client = processor.client
+    channels_dict = processor.channel_dict
+    iocs = processor.iocs
+    conf = processor.conf
     recceiverid = conf.get(RECCEIVERID_KEY, RECCEIVERID_DEFAULT)
     new = set(pvInfoByName.keys())
 
@@ -454,14 +454,14 @@ def __updateCF__(
     if hostName is None or iocName is None:
         raise Exception("missing hostName or iocName")
 
-    if proc.cancelled:
+    if processor.cancelled:
         raise defer.CancelledError()
 
     channels = []
     """A list of channels in channelfinder with the associated hostName and iocName"""
     _log.debug("Find existing channels by IOCID: {iocid}".format(iocid=iocid))
     old = client.findByArgs(prepareFindArgs(conf, [("iocid", iocid)]))
-    if proc.cancelled:
+    if processor.cancelled:
         raise defer.CancelledError()
 
     if old is not None:
@@ -688,7 +688,7 @@ def __updateCF__(
             prepareFindArgs(conf, [("~name", eachSearchString)])
         ):
             existingChannels[ch["name"]] = ch
-        if proc.cancelled:
+        if processor.cancelled:
             raise defer.CancelledError()
 
     for pv in new:
@@ -763,7 +763,7 @@ def __updateCF__(
     else:
         if old and len(old) != 0:
             client.set(channels=channels)
-    if proc.cancelled:
+    if processor.cancelled:
         raise defer.CancelledError()
 
 
@@ -819,7 +819,7 @@ def prepareFindArgs(conf, args, size=0):
 
 def poll(
     update,
-    proc,
+    processor,
     pvInfoByName,
     records_to_delete,
     hostName,
@@ -835,7 +835,7 @@ def poll(
     while not success:
         try:
             update(
-                proc,
+                processor,
                 pvInfoByName,
                 records_to_delete,
                 hostName,
