@@ -173,7 +173,7 @@ class DBProcessor(service.Service):
             % (self.trecinfo, self.trecord),
             [
                 (recid, srvid, K, V)
-                for recid, client_infos in TR.recinfos.items()
+                for recid, client_infos in TR.record_infos_to_add.items()
                 for K, V in client_infos.items()
             ],
         )
