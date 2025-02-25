@@ -316,8 +316,8 @@ class CFProcessor(service.Service):
                     record_name in recordInfoByName
                     and "aliases" in recordInfoByName[record_name]
                 ):
-                    for a in recordInfoByName[record_name]["aliases"]:
-                        self.records_dict[a].append(
+                    for alias in recordInfoByName[record_name]["aliases"]:
+                        self.records_dict[alias].append(
                             iocid
                         )  # add iocname to pvName in dict
                         self.iocs[iocid]["channelcount"] += 1
@@ -330,8 +330,8 @@ class CFProcessor(service.Service):
                         record_name in recordInfoByName
                         and "aliases" in recordInfoByName[record_name]
                     ):
-                        for a in recordInfoByName[record_name]["aliases"]:
-                            self.remove_channel(a, iocid)
+                        for alias in recordInfoByName[record_name]["aliases"]:
+                            self.remove_channel(alias, iocid)
         poll(
             __updateCF__,
             self,
@@ -346,16 +346,16 @@ class CFProcessor(service.Service):
         )
         dict_to_file(self.records_dict, self.iocs, self.conf)
 
-    def remove_channel(self, a, iocid):
-        self.records_dict[a].remove(iocid)
+    def remove_channel(self, recordName, iocid):
+        self.records_dict[recordName].remove(iocid)
         if iocid in self.iocs:
             self.iocs[iocid]["channelcount"] -= 1
         if self.iocs[iocid]["channelcount"] == 0:
             self.iocs.pop(iocid, None)
         elif self.iocs[iocid]["channelcount"] < 0:
             _log.error("Channel count negative: {s}", s=iocid)
-        if len(self.records_dict[a]) <= 0:  # case: record has no more iocs
-            del self.records_dict[a]
+        if len(self.records_dict[recordName]) <= 0:  # case: record has no more iocs
+            del self.records_dict[recordName]
 
     def clean_service(self):
         """
@@ -519,12 +519,12 @@ def __updateCF__(
                             cf_record["name"] in recordInfoByName
                             and "aliases" in recordInfoByName[cf_record["name"]]
                         ):
-                            for a in recordInfoByName[cf_record["name"]]["aliases"]:
-                                if a["name"] in records_dict:
-                                    a["owner"] = iocs[records_dict[a["name"]][-1]][
-                                        "owner"
-                                    ]
-                                    a["properties"] = __merge_property_lists(
+                            for alias in recordInfoByName[cf_record["name"]]["aliases"]:
+                                if alias["name"] in records_dict:
+                                    alias["owner"] = iocs[
+                                        records_dict[alias["name"]][-1]
+                                    ]["owner"]
+                                    alias["properties"] = __merge_property_lists(
                                         ch_create_properties(
                                             owner,
                                             iocTime,
@@ -533,7 +533,7 @@ def __updateCF__(
                                             iocs,
                                             cf_record,
                                         ),
-                                        a["properties"],
+                                        alias["properties"],
                                     )
                                     if conf.get("recordType", "default") == "on":
                                         cf_record["properties"] = (
@@ -543,14 +543,14 @@ def __updateCF__(
                                                         "name": "recordType",
                                                         "owner": owner,
                                                         "value": iocs[
-                                                            records_dict[a["name"]][-1]
+                                                            records_dict[alias["name"]][-1]
                                                         ]["recordType"],
                                                     }
                                                 ),
                                                 cf_record["properties"],
                                             )
                                         )
-                                    records.append(a)
+                                    records.append(alias)
                                     _log.debug(
                                         "Add existing alias to previous IOC: {s}".format(
                                             s=records[-1]
@@ -576,8 +576,8 @@ def __updateCF__(
                             cf_record["name"] in recordInfoByName
                             and "aliases" in recordInfoByName[cf_record["name"]]
                         ):
-                            for a in recordInfoByName[cf_record["name"]]["aliases"]:
-                                a["properties"] = __merge_property_lists(
+                            for alias in recordInfoByName[cf_record["name"]]["aliases"]:
+                                alias["properties"] = __merge_property_lists(
                                     [
                                         {
                                             "name": "pvStatus",
@@ -590,9 +590,9 @@ def __updateCF__(
                                             "value": iocTime,
                                         },
                                     ],
-                                    a["properties"],
+                                    alias["properties"],
                                 )
-                                records.append(a)
+                                records.append(alias)
                                 _log.debug(
                                     "Add orphaned alias with no IOC: {s}".format(
                                         s=records[-1]
@@ -623,10 +623,10 @@ def __updateCF__(
                             cf_record["name"] in recordInfoByName
                             and "aliases" in recordInfoByName[cf_record["name"]]
                         ):
-                            for a in recordInfoByName[cf_record["name"]]["aliases"]:
-                                if a in old:
+                            for alias in recordInfoByName[cf_record["name"]]["aliases"]:
+                                if alias in old:
                                     """alias exists in old list"""
-                                    a["properties"] = __merge_property_lists(
+                                    alias["properties"] = __merge_property_lists(
                                         [
                                             {
                                                 "name": "pvStatus",
@@ -639,10 +639,10 @@ def __updateCF__(
                                                 "value": iocTime,
                                             },
                                         ],
-                                        a["properties"],
+                                        alias["properties"],
                                     )
-                                    records.append(a)
-                                    new.remove(a["name"])
+                                    records.append(alias)
+                                    new.remove(alias["name"])
                                 else:
                                     """alias exists but not part of old list"""
                                     aprops = __merge_property_lists(
@@ -667,12 +667,12 @@ def __updateCF__(
                                     )
                                     records.append(
                                         {
-                                            "name": a["name"],
+                                            "name": alias["name"],
                                             "owner": owner,
                                             "properties": aprops,
                                         }
                                     )
-                                    new.remove(a["name"])
+                                    new.remove(alias["name"])
                                 _log.debug(
                                     "Add existing alias with same IOC: {s}".format(
                                         s=records[-1]
@@ -747,16 +747,16 @@ def __updateCF__(
                     alProps = [{"name": "alias", "owner": owner, "value": record_name}]
                     for p in newProps:
                         alProps.append(p)
-                    for a in recordInfoByName[record_name]["aliases"]:
-                        if a in existingChannels:
-                            ach = existingChannels[a]
+                    for alias in recordInfoByName[record_name]["aliases"]:
+                        if alias in existingChannels:
+                            ach = existingChannels[alias]
                             ach["properties"] = __merge_property_lists(
                                 alProps, ach["properties"]
                             )
                             records.append(ach)
                         else:
                             records.append(
-                                {"name": a, "owner": owner, "properties": alProps}
+                                {"name": alias, "owner": owner, "properties": alProps}
                             )
                         _log.debug(
                             "Add existing alias with different IOC: {s}".format(
@@ -778,9 +778,9 @@ def __updateCF__(
                     alProps = [{"name": "alias", "owner": owner, "value": record_name}]
                     for p in newProps:
                         alProps.append(p)
-                    for a in recordInfoByName[record_name]["aliases"]:
+                    for alias in recordInfoByName[record_name]["aliases"]:
                         records.append(
-                            {"name": a, "owner": owner, "properties": alProps}
+                            {"name": alias, "owner": owner, "properties": alProps}
                         )
                         _log.debug("Add new alias: {s}".format(s=records[-1]))
     _log.info(
