@@ -175,7 +175,9 @@ class ShowProcessor(service.Service):
     def _commit(self, trans):
         _log.debug("# Show processor '{name}' commit".format(name=self.name))
         _log.info(
-            "# From {host}:{port}".format(host=trans.src.host, port=trans.src.port)
+            "# From {host}:{port}".format(
+                host=trans.source_address.host, port=trans.source_address.port
+            )
         )
         if not trans.connected:
             _log.info("#  connection lost")
