@@ -25,7 +25,7 @@ __all__ = [
 
 
 class ConfigAdapter(object):
-    def __init__(self, conf, section):
+    def __init__(self, conf: Parser, section):
         self._C, self._S = conf, section
 
     def __len__(self):
@@ -186,7 +186,11 @@ class ShowProcessor(service.Service):
                 " epicsEnvSet('{name}','{value}')".format(name=item[0], value=item[1])
             )
         for record_id, (record_name, record_type) in trans.records_to_add.items():
-            _log.info(' record({record_type}, "{record_name}") {{'.format(record_type=record_type, record_name=record_name))
+            _log.info(
+                ' record({record_type}, "{record_name}") {{'.format(
+                    record_type=record_type, record_name=record_name
+                )
+            )
             for alias in trans.aliases.get(record_id, []):
                 _log.info('  alias("{alias}")'.format(alias=alias))
             for item in trans.record_infos_to_add.get(record_id, {}).items():

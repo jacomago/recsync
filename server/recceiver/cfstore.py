@@ -49,9 +49,10 @@ DEFAULT_RECORD_PROPERTY_NAMES = {
 
 @implementer(interfaces.IProcessor)
 class CFProcessor(service.Service):
-    def __init__(self, name, conf):
+    def __init__(self, name, conf: ConfigAdapter):
         _log.info("CF_INIT {name}".format(name=name))
-        self.name, self.conf = name, conf
+        self.name = name
+        self.conf = conf
         self.records_dict = defaultdict(list)
         self.iocs = dict()
         self.client = None
