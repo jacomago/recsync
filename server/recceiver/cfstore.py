@@ -36,6 +36,16 @@ __all__ = ["CFProcessor"]
 RECCEIVERID_KEY = "recceiverID"
 RECCEIVERID_DEFAULT = socket.gethostname()
 
+DEFAULT_RECORD_PROPERTY_NAMES = {
+    "hostName",
+    "iocName",
+    "pvStatus",
+    "time",
+    "iocid",
+    "iocIP",
+    RECCEIVERID_KEY,
+}
+
 
 @implementer(interfaces.IProcessor)
 class CFProcessor(service.Service):
@@ -76,51 +86,13 @@ class CFProcessor(service.Service):
             """
             self.client = ChannelFinderClient()
             try:
-                cf_properties = [
-                    cf_property["name"]
-                    for cf_property in self.client.getAllProperties()
-                ]
-                required_properties = {
-                    "hostName",
-                    "iocName",
-                    "pvStatus",
-                    "time",
-                    "iocid",
-                    "iocIP",
-                    RECCEIVERID_KEY,
-                }
+                cf_properties = self.fetch_cf_property_names()
+                required_properties = DEFAULT_RECORD_PROPERTY_NAMES
 
-                if self.conf.get("alias"):
-                    required_properties.add("alias")
-                if self.conf.get("recordType"):
-                    required_properties.add("recordType")
-                env_vars_setting = self.conf.get("environment_vars")
-                self.env_vars = {}
-                if env_vars_setting != "" and env_vars_setting is not None:
-                    env_vars_dict = dict(
-                        item.strip().split(":") for item in env_vars_setting.split(",")
-                    )
-                    self.env_vars = {
-                        k.strip(): v.strip() for k, v in env_vars_dict.items()
-                    }
-                    for epics_env_var_name, cf_prop_name in self.env_vars.items():
-                        required_properties.add(cf_prop_name)
-                # Standard property names for CA/PVA name server connections. These are
-                # environment variables from reccaster so take advantage of env_vars
-                if self.conf.get("iocConnectionInfo"):
-                    self.env_vars["RSRV_SERVER_PORT"] = "caPort"
-                    self.env_vars["PVAS_SERVER_PORT"] = "pvaPort"
-                    required_properties.add("caPort")
-                    required_properties.add("pvaPort")
-                infotags_whitelist = self.conf.get("infotags", list())
-                if infotags_whitelist:
-                    record_property_names_list = [
-                        s.strip(", ") for s in infotags_whitelist.split()
-                    ]
-                else:
-                    record_property_names_list = []
-                if self.conf.get("recordDesc"):
-                    record_property_names_list.append("recordDesc")
+                configured_properties = self.read_conf_properties(self.conf)
+                record_property_names_list = self.read_conf_record_properties(self.conf)
+
+                required_properties.update(configured_properties)
                 # Are any required properties not already present on CF?
                 properties = required_properties - set(cf_properties)
                 # Are any whitelisted properties not already present on CF?
@@ -143,6 +115,60 @@ class CFProcessor(service.Service):
             else:
                 if self.conf.getboolean("cleanOnStart", True):
                     self.clean_service()
+
+    def read_conf_properties(self, conf):
+        required_properties = set()
+        if conf.get("alias"):
+            required_properties.add("alias")
+
+        if conf.get("recordType"):
+            required_properties.add("recordType")
+
+        env_var_properties = self.read_conf_env_vars(conf)
+        required_properties.update(env_var_properties)
+
+        # Standard property names for CA/PVA name server connections. These are
+        # environment variables from reccaster so take advantage of env_vars
+        if conf.get("iocConnectionInfo"):
+            self.env_vars["RSRV_SERVER_PORT"] = "caPort"
+            self.env_vars["PVAS_SERVER_PORT"] = "pvaPort"
+            required_properties.add("caPort")
+            required_properties.add("pvaPort")
+
+        return required_properties
+
+    def read_conf_env_vars(self, conf):
+        required_properties = set()
+        env_vars_setting = conf.get("environment_vars")
+        self.env_vars = {}
+        if env_vars_setting != "" and env_vars_setting is not None:
+            env_vars_dict = dict(
+                item.strip().split(":") for item in env_vars_setting.split(",")
+            )
+            self.env_vars = {k.strip(): v.strip() for k, v in env_vars_dict.items()}
+            for epics_env_var_name, cf_prop_name in self.env_vars.items():
+                required_properties.add(cf_prop_name)
+        return required_properties
+
+    def read_conf_record_properties(self, conf):
+        configured_infotags = conf.get("infotags", list())
+        if configured_infotags:
+            record_property_names_list = [
+                s.strip(", ") for s in configured_infotags.split()
+            ]
+        else:
+            record_property_names_list = []
+
+        if conf.get("recordDesc"):
+            record_property_names_list.append("recordDesc")
+        return record_property_names_list
+
+    def fetch_cf_property_names(self):
+        cf_properties = [
+            cf_property["name"] for cf_property in self.client.getAllProperties()
+        ]
+
+        return cf_properties
 
     def stopService(self):
         _log.info("CF_STOP")
@@ -553,7 +579,9 @@ def __updateCF__(
                                                         "name": "recordType",
                                                         "owner": owner,
                                                         "value": iocs[
-                                                            records_dict[alias["name"]][-1]
+                                                            records_dict[alias["name"]][
+                                                                -1
+                                                            ]
                                                         ]["recordType"],
                                                     }
                                                 ),
