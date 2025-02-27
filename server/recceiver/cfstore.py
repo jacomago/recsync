@@ -2,6 +2,7 @@
 
 import logging
 import socket
+from typing import Any
 
 from zope.interface import implementer
 
@@ -13,6 +14,8 @@ from twisted.internet import defer
 from operator import itemgetter
 from collections import defaultdict
 import time
+
+from .processors import ConfigAdapter
 from . import interfaces
 import datetime
 import os
@@ -46,15 +49,19 @@ DEFAULT_RECORD_PROPERTY_NAMES = {
     RECCEIVERID_KEY,
 }
 
+Property = dict[str, str]
+Tag = dict[str, str]
+Record = dict[str, str | list[Tag] | list[Property]]
+
 
 @implementer(interfaces.IProcessor)
 class CFProcessor(service.Service):
     def __init__(self, name, conf: ConfigAdapter):
         _log.info("CF_INIT {name}".format(name=name))
-        self.name = name
-        self.conf = conf
+        self.name: str = name
+        self.conf: ConfigAdapter = conf
         self.records_dict = defaultdict(list)
-        self.iocs = dict()
+        self.iocs: dict[str, dict[str, str | int]] = dict()
         self.client = None
         self.currentTime = getCurrentTime
         self.lock = DeferredLock()
@@ -100,7 +107,7 @@ class CFProcessor(service.Service):
                 # If so, add them too.
                 properties.update(set(record_property_names_list) - set(cf_properties))
 
-                owner = self.conf.get("username", "cfstore")
+                owner: str = self.conf.get("username", "cfstore")
                 for cf_property in properties:
                     self.client.set(property={"name": cf_property, "owner": owner})
 
@@ -117,7 +124,7 @@ class CFProcessor(service.Service):
                 if self.conf.getboolean("cleanOnStart", True):
                     self.clean_service()
 
-    def read_conf_properties(self, conf):
+    def read_conf_properties(self, conf: ConfigAdapter) -> set[str]:
         required_properties = set()
         if conf.get("alias"):
             required_properties.add("alias")
@@ -138,10 +145,10 @@ class CFProcessor(service.Service):
 
         return required_properties
 
-    def read_conf_env_vars(self, conf):
+    def read_conf_env_vars(self, conf: ConfigAdapter) -> set[str]:
         required_properties = set()
         env_vars_setting = conf.get("environment_vars")
-        self.env_vars = {}
+        self.env_vars: dict[str, str] = {}
         if env_vars_setting != "" and env_vars_setting is not None:
             env_vars_dict = dict(
                 item.strip().split(":") for item in env_vars_setting.split(",")
@@ -151,7 +158,7 @@ class CFProcessor(service.Service):
                 required_properties.add(cf_prop_name)
         return required_properties
 
-    def read_conf_record_properties(self, conf):
+    def read_conf_record_properties(self, conf: ConfigAdapter) -> list[str]:
         configured_infotags = conf.get("infotags", list())
         if configured_infotags:
             record_property_names_list = [
@@ -164,7 +171,7 @@ class CFProcessor(service.Service):
             record_property_names_list.append("recordDesc")
         return record_property_names_list
 
-    def fetch_cf_property_names(self):
+    def fetch_cf_property_names(self) -> list[str]:
         cf_properties = [
             cf_property["name"] for cf_property in self.client.getAllProperties()
         ]
@@ -238,29 +245,168 @@ class CFProcessor(service.Service):
                 "infoProperties":{propName:value, ...}}}
         """
 
-        host = transaction.source_address.host
-        port = transaction.source_address.port
-        iocName = (
-            transaction.client_infos.get("IOCNAME") or transaction.source_address.port
+        host, iocName, hostName, owner, time, iocid = self.read_transaction_ioc_info(
+            transaction
         )
-        hostName = (
-            transaction.client_infos.get("HOSTNAME") or transaction.source_address.host
-        )
-        owner = (
-            transaction.client_infos.get("ENGINEER")
-            or transaction.client_infos.get("CF_USERNAME")
-            or self.conf.get("username", "cfstore")
-        )
-        time = self.currentTime(timezone=self.conf.get("timezone"))
 
-        """The unique identifier for a particular IOC"""
-        iocid = host + ":" + str(port)
+        records_details = self.read_transaction_names_types(transaction)
 
-        recordInfo = {}
-        for record_id, (record_name, record_type) in transaction.records_to_add.items():
-            recordInfo[record_id] = {"pvName": record_name}
-            if self.conf.get("recordType"):
-                recordInfo[record_id]["recordType"] = record_type
+        records_infos = self.read_transaction_record_infos_to_add(
+            transaction, owner, iocid, records_details
+        )
+        for record_id, record_info in records_infos.items():
+            records_details[record_id]["infoProperties"] = record_info
+
+        record_aliases = self.read_transaction_aliases(
+            transaction, iocid, records_details
+        )
+        for record_id, record_alias in record_aliases.items():
+            records_details[record_id]["aliases"] = record_alias
+
+        self.read_transaction_client_infos(transaction, iocName, owner, records_details)
+
+        records_to_delete = list(transaction.records_to_delete)
+        _log.debug("Delete records: {s}".format(s=records_to_delete))
+        if not transaction.connected:
+            records_to_delete.extend(self.records_dict.keys())
+
+        record_details_by_name = self.convert_record_infos_to_by_name(
+            iocid, records_details
+        )
+
+        if transaction.initial:
+            self.add_ioc(host, iocName, hostName, owner, time, iocid)
+
+        self.update_ioc_channel_counts_records_ioc_info(
+            iocid, records_to_delete, record_details_by_name
+        )
+
+        poll(
+            __updateCF__,
+            self,
+            record_details_by_name,
+            records_to_delete,
+            hostName,
+            iocName,
+            host,
+            iocid,
+            owner,
+            time,
+        )
+        dict_to_file(self.records_dict, self.iocs, self.conf)
+
+    def update_ioc_channel_counts_records_ioc_info(
+        self,
+        iocid: str,
+        records_to_delete: list[str],
+        record_details_by_name: dict[str, dict[str, Any]],
+    ):
+        for record_name in record_details_by_name.keys():
+            self.records_dict[record_name].append(
+                iocid
+            )  # add iocname to pvName in dict
+            self.iocs[iocid]["channelcount"] += 1
+            """In case, alias exists"""
+            if self.conf.get("alias"):
+                if (
+                    record_name in record_details_by_name
+                    and "aliases" in record_details_by_name[record_name]
+                ):
+                    for alias in record_details_by_name[record_name]["aliases"]:
+                        self.records_dict[alias].append(
+                            iocid
+                        )  # add iocname to pvName in dict
+                        self.iocs[iocid]["channelcount"] += 1
+
+        for record_name in records_to_delete:
+            if iocid in self.records_dict[record_name]:
+                self.remove_channel(record_name, iocid)
+                """In case, alias exists"""
+                if self.conf.get("alias"):
+                    if (
+                        record_name in record_details_by_name
+                        and "aliases" in record_details_by_name[record_name]
+                    ):
+                        for alias in record_details_by_name[record_name]["aliases"]:
+                            self.remove_channel(alias, iocid)
+
+    def read_transaction_client_infos(
+        self, transaction, iocName, owner, records_details
+    ):
+        for record_id in records_details:
+            for epics_env_var_name, cf_prop_name in self.env_vars.items():
+                if transaction.client_infos.get(epics_env_var_name) is not None:
+                    property = {
+                        "name": cf_prop_name,
+                        "owner": owner,
+                        "value": transaction.client_infos.get(epics_env_var_name),
+                    }
+                    if "infoProperties" not in records_details[record_id]:
+                        records_details[record_id]["infoProperties"] = list()
+                    records_details[record_id]["infoProperties"].append(property)
+                else:
+                    _log.debug(
+                        "EPICS environment var {env_var} listed in environment_vars setting list not found in this IOC: {iocName}".format(
+                            env_var=epics_env_var_name, iocName=iocName
+                        )
+                    )
+
+    def convert_record_infos_to_by_name(
+        self, iocid: str, recordInfo: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        recordInfoByName = {}
+        for record_id, (info) in recordInfo.items():
+            if info["pvName"] in recordInfoByName:
+                _log.warning(
+                    "Commit contains multiple records with PV name: {pv} ({iocid})".format(
+                        pv=info["pvName"], iocid=iocid
+                    )
+                )
+                continue
+            recordInfoByName[info["pvName"]] = info
+            _log.debug(
+                "Add record: {record_id}: {info}".format(record_id=record_id, info=info)
+            )
+
+        return recordInfoByName
+
+    def add_ioc(self, host, iocName, hostName, owner, time, iocid):
+        """Add IOC to source list"""
+        self.iocs[iocid] = {
+            "iocname": iocName,
+            "hostname": hostName,
+            "iocIP": host,
+            "owner": owner,
+            "time": time,
+            "channelcount": 0,
+        }
+
+    def read_transaction_aliases(
+        self,
+        transaction: interfaces.ITransaction,
+        iocid: str,
+        recordInfo: dict[str, dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        record_aliases = {}
+        for record_id, alias in transaction.aliases.items():
+            if record_id not in recordInfo:
+                _log.warning(
+                    "IOC: {iocid}: PV not found for alias with RID: {record_id}".format(
+                        iocid=iocid, record_id=record_id
+                    )
+                )
+                continue
+            record_aliases[record_id] = alias
+        return record_aliases
+
+    def read_transaction_record_infos_to_add(
+        self,
+        transaction: interfaces.ITransaction,
+        owner: str,
+        iocid: str,
+        recordInfo: dict[str, dict[str, str]],
+    ) -> dict[str, list[Property]]:
+        records_infos = {}
         for record_id, (record_infos_to_add) in transaction.record_infos_to_add.items():
             # find intersection of these sets
             if record_id not in recordInfo:
@@ -276,112 +422,46 @@ class CFProcessor(service.Service):
                 if p in record_infos_to_add.keys()
             ]
             if recinfo_wl:
-                recordInfo[record_id]["infoProperties"] = list()
+                records_infos[record_id] = list()
                 for infotag in recinfo_wl:
                     property = {
                         "name": infotag,
                         "owner": owner,
                         "value": record_infos_to_add[infotag],
                     }
-                    recordInfo[record_id]["infoProperties"].append(property)
+                    records_infos[record_id].append(property)
 
-        for record_id, alias in transaction.aliases.items():
-            if record_id not in recordInfo:
-                _log.warning(
-                    "IOC: {iocid}: PV not found for alias with RID: {record_id}".format(
-                        iocid=iocid, record_id=record_id
-                    )
-                )
-                continue
-            recordInfo[record_id]["aliases"] = alias
+        return records_infos
 
-        for record_id in recordInfo:
-            for epics_env_var_name, cf_prop_name in self.env_vars.items():
-                if transaction.client_infos.get(epics_env_var_name) is not None:
-                    property = {
-                        "name": cf_prop_name,
-                        "owner": owner,
-                        "value": transaction.client_infos.get(epics_env_var_name),
-                    }
-                    if "infoProperties" not in recordInfo[record_id]:
-                        recordInfo[record_id]["infoProperties"] = list()
-                    recordInfo[record_id]["infoProperties"].append(property)
-                else:
-                    _log.debug(
-                        "EPICS environment var {env_var} listed in environment_vars setting list not found in this IOC: {iocName}".format(
-                            env_var=epics_env_var_name, iocName=iocName
-                        )
-                    )
+    def read_transaction_names_types(
+        self, transaction: interfaces.ITransaction
+    ) -> dict[str, dict[str, Any]]:
+        recordInfo = {}
+        for record_id, (record_name, record_type) in transaction.records_to_add.items():
+            recordInfo[record_id] = {"pvName": record_name}
+            if self.conf.get("recordType", "default" == "on"):
+                recordInfo[record_id]["recordType"] = record_type
+        return recordInfo
 
-        records_to_delete = list(transaction.records_to_delete)
-        _log.debug("Delete records: {s}".format(s=records_to_delete))
-
-        recordInfoByName = {}
-        for record_id, (info) in recordInfo.items():
-            if info["pvName"] in recordInfoByName:
-                _log.warning(
-                    "Commit contains multiple records with PV name: {pv} ({iocid})".format(
-                        pv=info["pvName"], iocid=iocid
-                    )
-                )
-                continue
-            recordInfoByName[info["pvName"]] = info
-            _log.debug(
-                "Add record: {record_id}: {info}".format(record_id=record_id, info=info)
-            )
-
-        if transaction.initial:
-            """Add IOC to source list """
-            self.iocs[iocid] = {
-                "iocname": iocName,
-                "hostname": hostName,
-                "iocIP": host,
-                "owner": owner,
-                "time": time,
-                "channelcount": 0,
-            }
-        if not transaction.connected:
-            records_to_delete.extend(self.records_dict.keys())
-        for record_name in recordInfoByName.keys():
-            self.records_dict[record_name].append(
-                iocid
-            )
-            self.iocs[iocid]["channelcount"] += 1
-            """In case, alias exists"""
-            if self.conf.get("alias"):
-                if (
-                    record_name in recordInfoByName
-                    and "aliases" in recordInfoByName[record_name]
-                ):
-                    for alias in recordInfoByName[record_name]["aliases"]:
-                        self.records_dict[alias].append(
-                            iocid
-                        )  # add iocname to pvName in dict
-                        self.iocs[iocid]["channelcount"] += 1
-        for record_name in records_to_delete:
-            if iocid in self.records_dict[record_name]:
-                self.remove_channel(record_name, iocid)
-                """In case, alias exists"""
-                if self.conf.get("alias"):
-                    if (
-                        record_name in recordInfoByName
-                        and "aliases" in recordInfoByName[record_name]
-                    ):
-                        for alias in recordInfoByName[record_name]["aliases"]:
-                            self.remove_channel(alias, iocid)
-        poll(
-            __updateCF__,
-            self,
-            recordInfoByName,
-            records_to_delete,
-            hostName,
-            iocName,
-            host,
-            iocid,
-            owner,
-            time,
+    def read_transaction_ioc_info(self, transaction: interfaces.ITransaction):
+        host: str = transaction.source_address.host
+        port: int = transaction.source_address.port
+        iocName: str = (
+            transaction.client_infos.get("IOCNAME") or transaction.source_address.port
         )
-        dict_to_file(self.records_dict, self.iocs, self.conf)
+        hostName: str = (
+            transaction.client_infos.get("HOSTNAME") or transaction.source_address.host
+        )
+        owner: str = (
+            transaction.client_infos.get("ENGINEER")
+            or transaction.client_infos.get("CF_USERNAME")
+            or self.conf.get("username", "cfstore")
+        )
+        time: str = self.currentTime(timezone=self.conf.get("timezone", None))
+
+        """The unique identifier for a particular IOC"""
+        iocid: str = host + ":" + str(port)
+        return host, iocName, hostName, owner, time, iocid
 
     def remove_channel(self, recordName, iocid):
         self.records_dict[recordName].remove(iocid)
@@ -476,15 +556,15 @@ def dict_to_file(dict, iocs, conf):
 
 
 def __updateCF__(
-    processor,
-    recordInfoByName,
+    processor: CFProcessor,
+    recordInfoByName: dict[str, dict[str, Any]],
     records_to_delete,
-    hostName,
-    iocName,
-    iocIP,
-    iocid,
-    owner,
-    iocTime,
+    hostName: str,
+    iocName: str,
+    iocIP: str,
+    iocid: str,
+    owner: str,
+    iocTime: str,
 ):
     _log.info("CF Update IOC: {iocid}".format(iocid=iocid))
 
@@ -888,15 +968,15 @@ def prepareFindArgs(conf, args, size=0):
 
 def poll(
     update_method,
-    processor,
-    recordInfoByName,
+    processor: CFProcessor,
+    recordInfoByName: dict[str, dict[str, Any]],
     records_to_delete,
-    hostName,
-    iocName,
-    iocIP,
-    iocid,
-    owner,
-    iocTime,
+    hostName: str,
+    iocName: str,
+    iocIP: str,
+    iocid: str,
+    owner: str,
+    iocTime: str,
 ):
     _log.info("Polling {iocName} begins...".format(iocName=iocName))
     sleep = 1

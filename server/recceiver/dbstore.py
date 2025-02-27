@@ -144,7 +144,10 @@ class DBProcessor(service.Service):
             "INSERT INTO %s (host, id, record_type) VALUES (?,?,?)" % self.trecord,
             [
                 (srvid, recid, record_type)
-                for recid, (record_name, record_type) in transaction.records_to_add.items()
+                for recid, (
+                    record_name,
+                    record_type,
+                ) in transaction.records_to_add.items()
             ],
         )
 
@@ -156,7 +159,10 @@ class DBProcessor(service.Service):
             % (self.tname, self.trecord),
             [
                 (recid, srvid, record_name)
-                for recid, (record_name, record_type) in transaction.records_to_add.items()
+                for recid, (
+                    record_name,
+                    record_type,
+                ) in transaction.records_to_add.items()
             ],
         )
 
