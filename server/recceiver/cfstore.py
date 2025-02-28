@@ -58,11 +58,11 @@ Record = dict[str, str | list[Tag] | list[Property]]
 class CFProcessor(service.Service):
     def __init__(self, name, conf: ConfigAdapter):
         _log.info("CF_INIT {name}".format(name=name))
-        self.name: str = name
+        self.name: str | None = name
         self.conf: ConfigAdapter = conf
         self.records_dict = defaultdict(list)
         self.iocs: dict[str, dict[str, str | int]] = dict()
-        self.client = None
+        self.client: ChannelFinderClient = None
         self.currentTime = getCurrentTime
         self.lock = DeferredLock()
 
@@ -336,11 +336,11 @@ class CFProcessor(service.Service):
         for record_id in records_details:
             for epics_env_var_name, cf_prop_name in self.env_vars.items():
                 if transaction.client_infos.get(epics_env_var_name) is not None:
-                    property = {
-                        "name": cf_prop_name,
-                        "owner": owner,
-                        "value": transaction.client_infos.get(epics_env_var_name),
-                    }
+                    property = new_property(
+                        cf_prop_name,
+                        owner,
+                        transaction.client_infos.get(epics_env_var_name),
+                    )
                     if "infoProperties" not in records_details[record_id]:
                         records_details[record_id]["infoProperties"] = list()
                     records_details[record_id]["infoProperties"].append(property)
@@ -406,7 +406,7 @@ class CFProcessor(service.Service):
         iocid: str,
         recordInfo: dict[str, dict[str, str]],
     ) -> dict[str, list[Property]]:
-        records_infos = {}
+        records_infos: dict[str, list[Property]] = {}
         for record_id, (record_infos_to_add) in transaction.record_infos_to_add.items():
             # find intersection of these sets
             if record_id not in recordInfo:
@@ -424,11 +424,11 @@ class CFProcessor(service.Service):
             if recinfo_wl:
                 records_infos[record_id] = list()
                 for infotag in recinfo_wl:
-                    property = {
-                        "name": infotag,
-                        "owner": owner,
-                        "value": record_infos_to_add[infotag],
-                    }
+                    property = new_property(
+                        infotag,
+                        owner,
+                        record_infos_to_add[infotag],
+                    )
                     records_infos[record_id].append(property)
 
         return records_infos
@@ -533,7 +533,7 @@ class CFProcessor(service.Service):
             )
         )
         self.client.update(
-            property={"name": "pvStatus", "owner": owner, "value": "Inactive"},
+            property=new_property("pvStatus", owner, "Inactive"),
             channelNames=new_channels,
         )
 
@@ -616,13 +616,14 @@ def __updateCF__(
                     if conf.get("recordType"):
                         cf_record["properties"] = __merge_property_lists(
                             cf_record["properties"].append(
-                                {
-                                    "name": "recordType",
-                                    "owner": owner,
-                                    "value": iocs[records_dict[cf_record["name"]][-1]][
-                                        "recordType"
-                                    ],
-                                }
+                                recordType_property(
+                                    owner,
+                                    str(
+                                        iocs[records_dict[cf_record["name"]][-1]][
+                                            "recordType"
+                                        ]
+                                    ),
+                                )
                             ),
                             cf_record["properties"],
                         )
@@ -652,19 +653,20 @@ def __updateCF__(
                                         ),
                                         alias["properties"],
                                     )
-                                    if conf.get("recordType", "default") == "on":
+                                    if conf.get("recordType"):
                                         cf_record["properties"] = (
                                             __merge_property_lists(
                                                 cf_record["properties"].append(
-                                                    {
-                                                        "name": "recordType",
-                                                        "owner": owner,
-                                                        "value": iocs[
-                                                            records_dict[alias["name"]][
-                                                                -1
-                                                            ]
-                                                        ]["recordType"],
-                                                    }
+                                                    recordType_property(
+                                                        owner,
+                                                        str(
+                                                            iocs[
+                                                                records_dict[
+                                                                    alias["name"]
+                                                                ][-1]
+                                                            ]["recordType"]
+                                                        ),
+                                                    )
                                                 ),
                                                 cf_record["properties"],
                                             )
@@ -680,8 +682,8 @@ def __updateCF__(
                     """Orphan the record : mark as inactive, keep the old hostName and iocName"""
                     cf_record["properties"] = __merge_property_lists(
                         [
-                            {"name": "pvStatus", "owner": owner, "value": "Inactive"},
-                            {"name": "time", "owner": owner, "value": iocTime},
+                            inactive_property(owner),
+                            time_property(owner, iocTime),
                         ],
                         cf_record["properties"],
                     )
@@ -698,16 +700,13 @@ def __updateCF__(
                             for alias in recordInfoByName[cf_record["name"]]["aliases"]:
                                 alias["properties"] = __merge_property_lists(
                                     [
-                                        {
-                                            "name": "pvStatus",
-                                            "owner": owner,
-                                            "value": "Inactive",
-                                        },
-                                        {
-                                            "name": "time",
-                                            "owner": owner,
-                                            "value": iocTime,
-                                        },
+                                        inactive_property(
+                                            owner,
+                                        ),
+                                        time_property(
+                                            owner,
+                                            iocTime,
+                                        ),
                                     ],
                                     alias["properties"],
                                 )
@@ -725,8 +724,8 @@ def __updateCF__(
                     """
                     cf_record["properties"] = __merge_property_lists(
                         [
-                            {"name": "pvStatus", "owner": owner, "value": "Active"},
-                            {"name": "time", "owner": owner, "value": iocTime},
+                            active_property(owner),
+                            time_property(owner, iocTime),
                         ],
                         cf_record["properties"],
                     )
@@ -747,16 +746,13 @@ def __updateCF__(
                                     """alias exists in old list"""
                                     alias["properties"] = __merge_property_lists(
                                         [
-                                            {
-                                                "name": "pvStatus",
-                                                "owner": owner,
-                                                "value": "Active",
-                                            },
-                                            {
-                                                "name": "time",
-                                                "owner": owner,
-                                                "value": iocTime,
-                                            },
+                                            active_property(
+                                                owner,
+                                            ),
+                                            time_property(
+                                                owner,
+                                                iocTime,
+                                            ),
                                         ],
                                         alias["properties"],
                                     )
@@ -766,21 +762,17 @@ def __updateCF__(
                                     """alias exists but not part of old list"""
                                     aprops = __merge_property_lists(
                                         [
-                                            {
-                                                "name": "pvStatus",
-                                                "owner": owner,
-                                                "value": "Active",
-                                            },
-                                            {
-                                                "name": "time",
-                                                "owner": owner,
-                                                "value": iocTime,
-                                            },
-                                            {
-                                                "name": "alias",
-                                                "owner": owner,
-                                                "value": cf_record["name"],
-                                            },
+                                            active_property(
+                                                owner,
+                                            ),
+                                            time_property(
+                                                owner,
+                                                iocTime,
+                                            ),
+                                            alias_property(
+                                                owner,
+                                                cf_record["name"],
+                                            ),
                                         ],
                                         cf_record["properties"],
                                     )
@@ -835,11 +827,10 @@ def __updateCF__(
         )
         if conf.get("recordType", "default") == "on":
             newProps.append(
-                {
-                    "name": "recordType",
-                    "owner": owner,
-                    "value": recordInfoByName[record_name]["recordType"],
-                }
+                recordType_property(
+                    owner,
+                    recordInfoByName[record_name]["recordType"],
+                )
             )
         if (
             record_name in recordInfoByName
@@ -863,7 +854,7 @@ def __updateCF__(
                     record_name in recordInfoByName
                     and "aliases" in recordInfoByName[record_name]
                 ):
-                    alProps = [{"name": "alias", "owner": owner, "value": record_name}]
+                    alProps = [alias_property(owner, record_name)]
                     for p in newProps:
                         alProps.append(p)
                     for alias in recordInfoByName[record_name]["aliases"]:
@@ -894,7 +885,7 @@ def __updateCF__(
                     record_name in recordInfoByName
                     and "aliases" in recordInfoByName[record_name]
                 ):
-                    alProps = [{"name": "alias", "owner": owner, "value": record_name}]
+                    alProps = [new_property("alias", owner, record_name)]
                     for p in newProps:
                         alProps.append(p)
                     for alias in recordInfoByName[record_name]["aliases"]:
@@ -916,15 +907,43 @@ def __updateCF__(
         raise defer.CancelledError()
 
 
+def new_property(name: str, owner: str, value: str) -> Property:
+    return {"name": name, "owner": owner, "value": value}
+
+
+def alias_property(owner: str, value: str) -> Property:
+    return new_property("alias", owner, value)
+
+
+def pvStatus_property(owner: str, value: str) -> Property:
+    return new_property("pvStatus", owner, value)
+
+
+def active_property(owner: str) -> Property:
+    return pvStatus_property(owner, "Active")
+
+
+def inactive_property(owner: str) -> Property:
+    return pvStatus_property(owner, "Inactive")
+
+
+def recordType_property(owner: str, value: str) -> Property:
+    return new_property("recordType", owner, value)
+
+
+def time_property(owner: str, value: str) -> Property:
+    return new_property("time", owner, value)
+
+
 def create_properties(owner, iocTime, recceiverid, hostName, iocName, iocIP, iocid):
     return [
-        {"name": "hostName", "owner": owner, "value": hostName},
-        {"name": "iocName", "owner": owner, "value": iocName},
-        {"name": "iocid", "owner": owner, "value": iocid},
-        {"name": "iocIP", "owner": owner, "value": iocIP},
-        {"name": "pvStatus", "owner": owner, "value": "Active"},
-        {"name": "time", "owner": owner, "value": iocTime},
-        {"name": RECCEIVERID_KEY, "owner": owner, "value": recceiverid},
+        new_property("hostName", owner, hostName),
+        new_property("iocName", owner, iocName),
+        new_property("iocid", owner, iocid),
+        new_property("iocIP", owner, iocIP),
+        active_property(owner),
+        time_property(owner, iocTime),
+        new_property(RECCEIVERID_KEY, owner, recceiverid),
     ]
 
 
