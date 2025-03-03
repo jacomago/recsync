@@ -24,6 +24,37 @@ from channelfinder import ChannelFinderClient
 
 _log = logging.getLogger(__name__)
 
+
+class CFStoreException(Exception):
+    """Base exception class for CFStore errors."""
+
+    pass
+
+
+class ConfigurationError(CFStoreException):
+    """Raised when there is an error in configuration."""
+
+    pass
+
+
+class ChannelFinderError(CFStoreException):
+    """Raised when there is an error communicating with ChannelFinder service."""
+
+    pass
+
+
+class ValidationError(CFStoreException):
+    """Raised when there is an error validating data."""
+
+    pass
+
+
+class ResourceError(CFStoreException):
+    """Raised when there is an error managing resources."""
+
+    pass
+
+
 # ITRANSACTION FORMAT:
 #
 # source_address = source address
@@ -57,43 +88,91 @@ Record = dict[str, str | list[Tag] | list[Property]]
 @implementer(interfaces.IProcessor)
 class CFProcessor(service.Service):
     def __init__(self, name, conf: ConfigAdapter):
-        _log.info("CF_INIT {name}".format(name=name))
-        self.name: str | None = name
-        self.conf: ConfigAdapter = conf
-        self.records_dict = defaultdict(list)
-        self.iocs: dict[str, dict[str, str | int]] = dict()
-        self.client: ChannelFinderClient = None
-        self.currentTime = getCurrentTime
-        self.lock = DeferredLock()
+        """Initialize the CFProcessor service.
+
+        Args:
+            name: Name of the processor
+            conf: Configuration adapter containing settings
+
+        Raises:
+            ConfigurationError: If required configuration is missing
+            ValidationError: If configuration values are invalid
+        """
+        try:
+            _log.info("CF_INIT {name}".format(name=name))
+            self.validate_configuration(conf)
+
+            self.name: str | None = name
+            self.conf: ConfigAdapter = conf
+            self.records_dict = defaultdict(list)
+            self.iocs: dict[str, dict[str, str | int]] = dict()
+            self.client: ChannelFinderClient = None
+            self.currentTime = getCurrentTime
+            self.lock = DeferredLock()
+        except Exception as e:
+            raise ConfigurationError(
+                f"Failed to initialize CFProcessor: {str(e)}"
+            ) from e
+
+    def validate_configuration(self, conf: ConfigAdapter) -> None:
+        """Validate the configuration settings.
+
+        Args:
+            conf: Configuration adapter to validate
+
+        Raises:
+            ValidationError: If required settings are missing or invalid
+        """
+        required_settings = ["username"]
+        for setting in required_settings:
+            if not conf.get(setting):
+                raise ValidationError(
+                    f"Missing required configuration setting: {setting}"
+                )
 
     def startService(self):
+        """Start the CFProcessor service.
+
+        Raises:
+            ResourceError: If unable to acquire required resources
+            ChannelFinderError: If unable to connect to ChannelFinder service
+        """
         service.Service.startService(self)
-        # Returning a Deferred is not supported by startService(),
-        # so instead attempt to acquire the lock synchonously!
-        d = self.lock.acquire()
-        if not d.called:
-            d.cancel()
-            service.Service.stopService(self)
-            raise RuntimeError("Failed to acquired CF Processor lock for service start")
 
         try:
-            self._startServiceWithLock()
-        except:
+            # Returning a Deferred is not supported by startService(),
+            # so instead attempt to acquire the lock synchonously!
+            d = self.lock.acquire()
+            if not d.called:
+                d.cancel()
+                service.Service.stopService(self)
+                raise ResourceError(
+                    "Failed to acquire CF Processor lock for service start"
+                )
+
+            try:
+                self._startServiceWithLock()
+            except Exception as e:
+                raise ChannelFinderError(f"Failed to start service: {str(e)}") from e
+            finally:
+                self.lock.release()
+        except Exception:
             service.Service.stopService(self)
             raise
-        finally:
-            self.lock.release()
 
     def _startServiceWithLock(self):
+        """Initialize the service with acquired lock.
+
+        Raises:
+            ChannelFinderError: If unable to connect to or configure ChannelFinder
+            ConfigurationError: If configuration is invalid
+        """
         _log.info("CF_START")
 
         if self.client is None:  # For setting up mock test client
-            """
-            Using the default python cf-client.  The url, username, and
-            password are provided by the channelfinder._conf module.
-            """
-            self.client = ChannelFinderClient()
             try:
+                self.client = ChannelFinderClient()
+
                 cf_properties = self.fetch_cf_property_names()
                 required_properties = DEFAULT_RECORD_PROPERTY_NAMES
 
@@ -109,7 +188,12 @@ class CFProcessor(service.Service):
 
                 owner: str = self.conf.get("username", "cfstore")
                 for cf_property in properties:
-                    self.client.set(property={"name": cf_property, "owner": owner})
+                    try:
+                        self.client.set(property={"name": cf_property, "owner": owner})
+                    except Exception as e:
+                        raise ChannelFinderError(
+                            f"Failed to set property {cf_property}: {str(e)}"
+                        ) from e
 
                 self.record_property_names_list = set(record_property_names_list)
                 _log.debug(
@@ -117,12 +201,20 @@ class CFProcessor(service.Service):
                         self.record_property_names_list
                     )
                 )
-            except ConnectionError:
+            except ConnectionError as e:
                 _log.exception("Cannot connect to Channelfinder service")
-                raise
+                raise ChannelFinderError(
+                    "Cannot connect to Channelfinder service"
+                ) from e
+            except Exception as e:
+                raise ChannelFinderError(f"Error initializing service: {str(e)}") from e
             else:
                 if self.conf.getboolean("cleanOnStart", True):
-                    self.clean_service()
+                    try:
+                        self.clean_service()
+                    except Exception as e:
+                        _log.error(f"Failed to clean service on start: {str(e)}")
+                        # Don't raise here as this is not critical for service start
 
     def read_conf_properties(self, conf: ConfigAdapter) -> set[str]:
         required_properties = set()
