@@ -263,51 +263,190 @@ class CFProcessor(service.Service):
                     _log.error(f"Failed to clean service on start: {str(e)}")
 
     def read_conf_properties(self, conf: ConfigAdapter) -> set[str]:
-        required_properties = set()
-        if conf.get("alias"):
-            required_properties.add("alias")
+        """Read and validate configuration properties.
 
-        if conf.get("recordType"):
-            required_properties.add("recordType")
+        This method reads the configuration settings and determines which properties
+        are required based on the configuration values.
 
-        env_var_properties = self.read_conf_env_vars(conf)
-        required_properties.update(env_var_properties)
+        Args:
+            conf: Configuration adapter containing settings
 
-        # Standard property names for CA/PVA name server connections. These are
-        # environment variables from reccaster so take advantage of env_vars
-        if conf.get("iocConnectionInfo"):
-            self.env_vars["RSRV_SERVER_PORT"] = "caPort"
-            self.env_vars["PVAS_SERVER_PORT"] = "pvaPort"
-            required_properties.add("caPort")
-            required_properties.add("pvaPort")
+        Returns:
+            set[str]: Set of required property names
 
-        return required_properties
+        Raises:
+            ConfigurationError: If configuration values are invalid
+            ValidationError: If required settings are missing or invalid
+        """
+        try:
+            required_properties = set()
+
+            # Handle alias configuration
+            alias_setting = conf.get("alias")
+            if alias_setting:
+                if not isinstance(alias_setting, (str, bool)):
+                    raise ValidationError("Alias setting must be a string or boolean")
+                required_properties.add("alias")
+
+            # Handle record type configuration
+            record_type = conf.get("recordType")
+            if record_type:
+                if not isinstance(record_type, (str, bool)):
+                    raise ValidationError(
+                        "Record type setting must be a string or boolean"
+                    )
+                required_properties.add("recordType")
+
+            # Read environment variables
+            try:
+                env_var_properties = self.read_conf_env_vars(conf)
+                required_properties.update(env_var_properties)
+            except ValidationError as e:
+                raise ValidationError(
+                    f"Error reading environment variables: {str(e)}"
+                ) from e
+
+            # Handle IOC connection info
+            ioc_conn_info = conf.get("iocConnectionInfo")
+            if ioc_conn_info:
+                if not isinstance(ioc_conn_info, (str, bool)):
+                    raise ValidationError(
+                        "IOC connection info setting must be a string or boolean"
+                    )
+                self.env_vars["RSRV_SERVER_PORT"] = "caPort"
+                self.env_vars["PVAS_SERVER_PORT"] = "pvaPort"
+                required_properties.add("caPort")
+                required_properties.add("pvaPort")
+
+            return required_properties
+
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ConfigurationError(
+                f"Error reading configuration properties: {str(e)}"
+            ) from e
 
     def read_conf_env_vars(self, conf: ConfigAdapter) -> set[str]:
-        required_properties = set()
-        env_vars_setting = conf.get("environment_vars")
-        self.env_vars: dict[str, str] = {}
-        if env_vars_setting != "" and env_vars_setting is not None:
-            env_vars_dict = dict(
-                item.strip().split(":") for item in env_vars_setting.split(",")
-            )
-            self.env_vars = {k.strip(): v.strip() for k, v in env_vars_dict.items()}
-            for epics_env_var_name, cf_prop_name in self.env_vars.items():
-                required_properties.add(cf_prop_name)
-        return required_properties
+        """Read and validate environment variable configuration.
+
+        This method processes the environment_vars configuration setting and creates
+        a mapping between EPICS environment variables and CF property names.
+
+        Args:
+            conf: Configuration adapter containing settings
+
+        Returns:
+            set[str]: Set of required property names from environment variables
+
+        Raises:
+            ValidationError: If environment variable configuration is invalid
+            ConfigurationError: If environment variable processing fails
+        """
+        try:
+            required_properties = set()
+            env_vars_setting = conf.get("environment_vars")
+            self.env_vars = {}
+
+            if env_vars_setting:
+                if not isinstance(env_vars_setting, str):
+                    raise ValidationError("environment_vars setting must be a string")
+
+                try:
+                    # Split and validate each environment variable mapping
+                    for item in env_vars_setting.split(","):
+                        if not item.strip():
+                            continue
+
+                        if ":" not in item:
+                            raise ValidationError(
+                                f"Invalid environment variable mapping format: {item}"
+                            )
+
+                        env_var, prop_name = item.strip().split(":")
+                        env_var = env_var.strip()
+                        prop_name = prop_name.strip()
+
+                        if not env_var or not prop_name:
+                            raise ValidationError(
+                                f"Empty environment variable or property name in mapping: {item}"
+                            )
+
+                        self.env_vars[env_var] = prop_name
+                        required_properties.add(prop_name)
+
+                except ValueError as e:
+                    raise ValidationError(
+                        f"Error parsing environment variable mapping: {str(e)}"
+                    ) from e
+
+            return required_properties
+
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ConfigurationError(
+                f"Error processing environment variables configuration: {str(e)}"
+            ) from e
 
     def read_conf_record_properties(self, conf: ConfigAdapter) -> list[str]:
-        configured_infotags = conf.get("infotags", list())
-        if configured_infotags:
-            record_property_names_list = [
-                s.strip(", ") for s in configured_infotags.split()
-            ]
-        else:
+        """Read and validate record property configuration.
+
+        This method processes the infotags and recordDesc configuration settings
+        to determine which record properties should be included.
+
+        Args:
+            conf: Configuration adapter containing settings
+
+        Returns:
+            list[str]: List of record property names
+
+        Raises:
+            ValidationError: If record property configuration is invalid
+            ConfigurationError: If property processing fails
+        """
+        try:
             record_property_names_list = []
 
-        if conf.get("recordDesc"):
-            record_property_names_list.append("recordDesc")
-        return record_property_names_list
+            # Handle infotags configuration
+            infotags = conf.get("infotags", list())
+            if infotags:
+                if not isinstance(infotags, (str, list)):
+                    raise ValidationError("infotags setting must be a string or list")
+
+                if isinstance(infotags, str):
+                    # Split and validate each infotag
+                    for tag in infotags.split():
+                        tag = tag.strip(", ")
+                        if not tag:
+                            continue
+                        if not isinstance(tag, str):
+                            raise ValidationError(f"Invalid infotag format: {tag}")
+                        record_property_names_list.append(tag)
+                else:
+                    record_property_names_list.extend(infotags)
+
+            # Handle recordDesc configuration
+            record_desc = conf.get("recordDesc")
+            if record_desc:
+                if not isinstance(record_desc, (str, bool)):
+                    raise ValidationError(
+                        "recordDesc setting must be a string or boolean"
+                    )
+                record_property_names_list.append("recordDesc")
+
+            # Validate final list
+            if len(set(record_property_names_list)) != len(record_property_names_list):
+                raise ValidationError("Duplicate record property names found")
+
+            return record_property_names_list
+
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ConfigurationError(
+                f"Error reading record properties: {str(e)}"
+            ) from e
 
     def fetch_cf_property_names(self) -> list[str]:
         cf_properties = [
