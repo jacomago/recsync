@@ -2,7 +2,7 @@
 
 import logging
 import socket
-from typing import Any
+from typing import Any, List, Set, Dict
 
 from zope.interface import implementer
 
@@ -603,201 +603,185 @@ def __updateCF__(
             if (
                 len(new_records) == 0 or cf_record["name"] in records_to_delete
             ):  # case: empty commit/del, remove all reference to ioc
-                if cf_record["name"] in records_dict:
-                    cf_record["owner"] = iocs[records_dict[cf_record["name"]][-1]][
-                        "owner"
-                    ]
-                    cf_record["properties"] = __merge_property_lists(
-                        ch_create_properties(
-                            owner, iocTime, recceiverid, records_dict, iocs, cf_record
-                        ),
-                        cf_record["properties"],
-                    )
-                    if conf.get("recordType"):
-                        cf_record["properties"] = __merge_property_lists(
-                            cf_record["properties"].append(
-                                recordType_property(
-                                    owner,
-                                    str(
-                                        iocs[records_dict[cf_record["name"]][-1]][
-                                            "recordType"
-                                        ]
-                                    ),
-                                )
-                            ),
-                            cf_record["properties"],
-                        )
-                    records.append(cf_record)
-                    _log.debug(
-                        "Add existing record to previous IOC: {s}".format(s=records[-1])
-                    )
-                    """In case alias exist, also delete them"""
-                    if conf.get("alias"):
-                        if (
-                            cf_record["name"] in recordInfoByName
-                            and "aliases" in recordInfoByName[cf_record["name"]]
-                        ):
-                            for alias in recordInfoByName[cf_record["name"]]["aliases"]:
-                                if alias["name"] in records_dict:
-                                    alias["owner"] = iocs[
-                                        records_dict[alias["name"]][-1]
-                                    ]["owner"]
-                                    alias["properties"] = __merge_property_lists(
-                                        ch_create_properties(
-                                            owner,
-                                            iocTime,
-                                            recceiverid,
-                                            records_dict,
-                                            iocs,
-                                            cf_record,
-                                        ),
-                                        alias["properties"],
-                                    )
-                                    if conf.get("recordType"):
-                                        cf_record["properties"] = (
-                                            __merge_property_lists(
-                                                cf_record["properties"].append(
-                                                    recordType_property(
-                                                        owner,
-                                                        str(
-                                                            iocs[
-                                                                records_dict[
-                                                                    alias["name"]
-                                                                ][-1]
-                                                            ]["recordType"]
-                                                        ),
-                                                    )
-                                                ),
-                                                cf_record["properties"],
-                                            )
-                                        )
-                                    records.append(alias)
-                                    _log.debug(
-                                        "Add existing alias to previous IOC: {s}".format(
-                                            s=records[-1]
-                                        )
-                                    )
-
-                else:
-                    """Orphan the record : mark as inactive, keep the old hostName and iocName"""
-                    cf_record["properties"] = __merge_property_lists(
-                        [
-                            inactive_property(owner),
-                            time_property(owner, iocTime),
-                        ],
-                        cf_record["properties"],
-                    )
-                    records.append(cf_record)
-                    _log.debug(
-                        "Add orphaned record with no IOC: {s}".format(s=records[-1])
-                    )
-                    """Also orphan any alias"""
-                    if conf.get("alias", "default") == "on":
-                        if (
-                            cf_record["name"] in recordInfoByName
-                            and "aliases" in recordInfoByName[cf_record["name"]]
-                        ):
-                            for alias in recordInfoByName[cf_record["name"]]["aliases"]:
-                                alias["properties"] = __merge_property_lists(
-                                    [
-                                        inactive_property(
-                                            owner,
-                                        ),
-                                        time_property(
-                                            owner,
-                                            iocTime,
-                                        ),
-                                    ],
-                                    alias["properties"],
-                                )
-                                records.append(alias)
-                                _log.debug(
-                                    "Add orphaned alias with no IOC: {s}".format(
-                                        s=records[-1]
-                                    )
-                                )
+                update_records_down_ioc(
+                    recordInfoByName,
+                    owner,
+                    iocTime,
+                    records_dict,
+                    iocs,
+                    conf,
+                    recceiverid,
+                    records,
+                    cf_record,
+                )
             else:
                 if cf_record["name"] in new_records:  # case: record in old and new
-                    """
-                    Channel exists in Channelfinder with same hostname and iocname.
-                    Update the status to ensure it is marked active and update the time.
-                    """
-                    cf_record["properties"] = __merge_property_lists(
-                        [
-                            active_property(owner),
-                            time_property(owner, iocTime),
-                        ],
-                        cf_record["properties"],
+                    update_record_old_and_new(
+                        recordInfoByName,
+                        owner,
+                        iocTime,
+                        conf,
+                        new_records,
+                        records,
+                        old_records,
+                        cf_record,
                     )
-                    records.append(cf_record)
-                    _log.debug(
-                        "Add existing record with same IOC: {s}".format(s=records[-1])
-                    )
-                    new_records.remove(cf_record["name"])
-
-                    """In case, alias exist"""
-                    if conf.get("alias", "default") == "on":
-                        if (
-                            cf_record["name"] in recordInfoByName
-                            and "aliases" in recordInfoByName[cf_record["name"]]
-                        ):
-                            for alias in recordInfoByName[cf_record["name"]]["aliases"]:
-                                if alias in old_records:
-                                    """alias exists in old list"""
-                                    alias["properties"] = __merge_property_lists(
-                                        [
-                                            active_property(
-                                                owner,
-                                            ),
-                                            time_property(
-                                                owner,
-                                                iocTime,
-                                            ),
-                                        ],
-                                        alias["properties"],
-                                    )
-                                    records.append(alias)
-                                    new_records.remove(alias["name"])
-                                else:
-                                    """alias exists but not part of old list"""
-                                    aprops = __merge_property_lists(
-                                        [
-                                            active_property(
-                                                owner,
-                                            ),
-                                            time_property(
-                                                owner,
-                                                iocTime,
-                                            ),
-                                            alias_property(
-                                                owner,
-                                                cf_record["name"],
-                                            ),
-                                        ],
-                                        cf_record["properties"],
-                                    )
-                                    records.append(
-                                        {
-                                            "name": alias["name"],
-                                            "owner": owner,
-                                            "properties": aprops,
-                                        }
-                                    )
-                                    new_records.remove(alias["name"])
-                                _log.debug(
-                                    "Add existing alias with same IOC: {s}".format(
-                                        s=records[-1]
-                                    )
-                                )
     # now pvNames contains a list of pv's new on this host/ioc
     """A dictionary representing the current channelfinder information associated with the pvNames"""
     existingChannels = {}
 
-    """
-    The list of pv's is searched keeping in mind the limitations on the URL length
-    The search is split into groups to ensure that the size does not exceed 600 characters
-    """
-    searchStrings = []
+    update_get_existing_channels(processor, client, conf, new_records, existingChannels)
+
+    update_handle_new_records(
+        recordInfoByName,
+        hostName,
+        iocName,
+        iocIP,
+        iocid,
+        owner,
+        iocTime,
+        conf,
+        recceiverid,
+        new_records,
+        records,
+        existingChannels,
+    )
+    _log.info(
+        "Total records to update: {nChannels} {iocName}".format(
+            nChannels=len(records), iocName=iocName
+        )
+    )
+    if len(records) != 0:
+        client.set(channels=records)
+    else:
+        if old_records and len(old_records) != 0:
+            client.set(channels=records)
+    if processor.cancelled:
+        raise defer.CancelledError()
+
+
+def update_handle_new_records(
+    recordInfoByName: Dict[str, Dict[str, Any]],
+    hostName: str,
+    iocName: str,
+    iocIP: str,
+    iocid: str,
+    owner: str,
+    iocTime: str,
+    conf: ConfigAdapter,
+    recceiverid: str,
+    new_records: Set[str],
+    records: List[Dict[str, Any]],
+    existingChannels: Dict[str, Dict[str, Any]],
+) -> None:
+    """Handle processing of new records"""
+    for record_name in new_records:
+        newProps = create_properties(
+            owner, iocTime, recceiverid, hostName, iocName, iocIP, iocid
+        )
+        if conf.get("recordType", "default") == "on":
+            newProps.append(
+                recordType_property(
+                    owner,
+                    recordInfoByName[record_name]["recordType"],
+                )
+            )
+        if (
+            record_name in recordInfoByName
+            and "infoProperties" in recordInfoByName[record_name]
+        ):
+            newProps = newProps + recordInfoByName[record_name]["infoProperties"]
+
+        if record_name in existingChannels:
+            update_existing_record_different_hostname(
+                recordInfoByName,
+                owner,
+                conf,
+                records,
+                existingChannels,
+                record_name,
+                newProps,
+            )
+        else:
+            update_handle_new_record(
+                recordInfoByName, owner, conf, records, record_name, newProps
+            )
+
+
+def update_handle_new_record(
+    recordInfoByName: Dict[str, Dict[str, Any]],
+    owner: str,
+    conf: ConfigAdapter,
+    records: List[Dict[str, Any]],
+    record_name: str,
+    newProps: List[Property],
+) -> None:
+    """Process a new record entry"""
+    records.append({"name": record_name, "owner": owner, "properties": newProps})
+    _log.debug("Add new record: {s}".format(s=records[-1]))
+    if conf.get("alias", "default") == "on":
+        if (
+            record_name in recordInfoByName
+            and "aliases" in recordInfoByName[record_name]
+        ):
+            alProps = [new_property("alias", owner, record_name)]
+            for p in newProps:
+                alProps.append(p)
+            for alias in recordInfoByName[record_name]["aliases"]:
+                records.append({"name": alias, "owner": owner, "properties": alProps})
+                _log.debug("Add new alias: {s}".format(s=records[-1]))
+
+
+def update_existing_record_different_hostname(
+    recordInfoByName: Dict[str, Dict[str, Any]],
+    owner: str,
+    conf: ConfigAdapter,
+    records: List[Dict[str, Any]],
+    existingChannels: Dict[str, Dict[str, Any]],
+    record_name: str,
+    newProps: List[Property],
+) -> None:
+    """Update existing record with different hostname/iocname"""
+    existingChannel = existingChannels[record_name]
+    existingChannel["properties"] = __merge_property_lists(
+        newProps, existingChannel["properties"]
+    )
+    records.append(existingChannel)
+    _log.debug("Add existing record with different IOC: {s}".format(s=records[-1]))
+
+    if conf.get("alias", "default") == "on":
+        if (
+            record_name in recordInfoByName
+            and "aliases" in recordInfoByName[record_name]
+        ):
+            alProps = [alias_property(owner, record_name)]
+            for p in newProps:
+                alProps.append(p)
+            for alias in recordInfoByName[record_name]["aliases"]:
+                if alias in existingChannels:
+                    ach = existingChannels[alias]
+                    ach["properties"] = __merge_property_lists(
+                        alProps, ach["properties"]
+                    )
+                    records.append(ach)
+                else:
+                    records.append(
+                        {"name": alias, "owner": owner, "properties": alProps}
+                    )
+                _log.debug(
+                    "Add existing alias with different IOC: {s}".format(s=records[-1])
+                )
+
+
+def update_get_existing_channels(
+    processor: CFProcessor,
+    client: ChannelFinderClient,
+    conf: ConfigAdapter,
+    new_records: Set[str],
+    existingChannels: Dict[str, Dict[str, Any]],
+) -> None:
+    """Get existing channels with URL length limitation handling"""
+    searchStrings: List[str] = []
     searchString = ""
     for record_name in new_records:
         if not searchString:
@@ -821,121 +805,436 @@ def __updateCF__(
         if processor.cancelled:
             raise defer.CancelledError()
 
-    for record_name in new_records:
-        newProps = create_properties(
-            owner, iocTime, recceiverid, hostName, iocName, iocIP, iocid
+
+def update_record_old_and_new(
+    recordInfoByName: Dict[str, Dict[str, Any]],
+    owner: str,
+    iocTime: str,
+    conf: ConfigAdapter,
+    new_records: Set[str],
+    records: List[Dict[str, Any]],
+    old_records: List[Dict[str, Any]],
+    cf_record: Dict[str, Any],
+) -> None:
+    """Update record that exists in both old and new records"""
+    cf_record["properties"] = __merge_property_lists(
+        [
+            active_property(owner),
+            time_property(owner, iocTime),
+        ],
+        cf_record["properties"],
+    )
+    records.append(cf_record)
+    _log.debug("Add existing record with same IOC: {s}".format(s=records[-1]))
+    new_records.remove(cf_record["name"])
+
+    if conf.get("alias", "default") == "on":
+        if (
+            cf_record["name"] in recordInfoByName
+            and "aliases" in recordInfoByName[cf_record["name"]]
+        ):
+            for alias in recordInfoByName[cf_record["name"]]["aliases"]:
+                if alias in old_records:
+                    alias["properties"] = __merge_property_lists(
+                        [
+                            active_property(owner),
+                            time_property(owner, iocTime),
+                        ],
+                        alias["properties"],
+                    )
+                    records.append(alias)
+                    new_records.remove(alias["name"])
+                else:
+                    aprops = __merge_property_lists(
+                        [
+                            active_property(owner),
+                            time_property(owner, iocTime),
+                            alias_property(owner, cf_record["name"]),
+                        ],
+                        cf_record["properties"],
+                    )
+                    records.append(
+                        {
+                            "name": alias["name"],
+                            "owner": owner,
+                            "properties": aprops,
+                        }
+                    )
+                    new_records.remove(alias["name"])
+                _log.debug(
+                    "Add existing alias with same IOC: {s}".format(s=records[-1])
+                )
+
+
+def update_records_down_ioc(
+    recordInfoByName: Dict[str, Dict[str, Any]],
+    owner: str,
+    iocTime: str,
+    records_dict: Dict[str, List[str]],
+    iocs: Dict[str, Dict[str, Any]],
+    conf: ConfigAdapter,
+    recceiverid: str,
+    records: List[Dict[str, Any]],
+    cf_record: Dict[str, Any],
+) -> None:
+    """Update records when IOC is down"""
+    if cf_record["name"] in records_dict:
+        update_record_ioc_properties(
+            owner, iocTime, records_dict, iocs, conf, recceiverid, cf_record
         )
-        if conf.get("recordType", "default") == "on":
-            newProps.append(
+        records.append(cf_record)
+        _log.debug("Add existing record to previous IOC: {s}".format(s=records[-1]))
+
+        if conf.get("alias"):
+            update_records_delete_alias(
+                recordInfoByName,
+                owner,
+                iocTime,
+                records_dict,
+                iocs,
+                conf,
+                recceiverid,
+                records,
+                cf_record,
+            )
+    else:
+        cf_record["properties"] = __merge_property_lists(
+            [
+                inactive_property(owner),
+                time_property(owner, iocTime),
+            ],
+            cf_record["properties"],
+        )
+        records.append(cf_record)
+        _log.debug("Add orphaned record with no IOC: {s}".format(s=records[-1]))
+
+        if conf.get("alias", "default") == "on":
+            update_records_orphan_alias(
+                recordInfoByName, owner, iocTime, records, cf_record
+            )
+
+
+def update_records_orphan_alias(
+    recordInfoByName: Dict[str, Dict[str, Any]],
+    owner: str,
+    iocTime: str,
+    records: List[Dict[str, Any]],
+    cf_record: Dict[str, Any],
+) -> None:
+    """Update orphaned aliases"""
+    if (
+        cf_record["name"] in recordInfoByName
+        and "aliases" in recordInfoByName[cf_record["name"]]
+    ):
+        for alias in recordInfoByName[cf_record["name"]]["aliases"]:
+            alias["properties"] = __merge_property_lists(
+                [
+                    inactive_property(owner),
+                    time_property(owner, iocTime),
+                ],
+                alias["properties"],
+            )
+            records.append(alias)
+            _log.debug("Add orphaned alias with no IOC: {s}".format(s=records[-1]))
+
+
+def update_record_ioc_properties(
+    owner: str,
+    iocTime: str,
+    records_dict: Dict[str, List[str]],
+    iocs: Dict[str, Dict[str, Any]],
+    conf: ConfigAdapter,
+    recceiverid: str,
+    cf_record: Dict[str, Any],
+) -> None:
+    """Update IOC-related properties for a channel finder record.
+
+    This function updates the properties of a channel finder record with information
+    from its associated IOC. It handles owner assignment, property merging, and
+    record type updates.
+
+    Args:
+        owner: Owner of the record properties
+        iocTime: Timestamp for the record update
+        records_dict: Dictionary mapping record names to list of IOC IDs
+        iocs: Dictionary containing IOC information
+        conf: Configuration adapter
+        recceiverid: Unique identifier for the receiver
+        cf_record: Channel finder record to update
+
+    Returns:
+        None
+
+    Note:
+        The function modifies the cf_record dictionary in-place by updating its
+        properties and owner information.
+    """
+    cf_record["owner"] = iocs[records_dict[cf_record["name"]][-1]]["owner"]
+    cf_record["properties"] = __merge_property_lists(
+        ch_create_properties(
+            owner, iocTime, recceiverid, records_dict, iocs, cf_record
+        ),
+        cf_record["properties"],
+    )
+    if conf.get("recordType"):
+        cf_record["properties"] = __merge_property_lists(
+            cf_record["properties"].append(
                 recordType_property(
                     owner,
-                    recordInfoByName[record_name]["recordType"],
+                    str(iocs[records_dict[cf_record["name"]][-1]]["recordType"]),
                 )
-            )
-        if (
-            record_name in recordInfoByName
-            and "infoProperties" in recordInfoByName[record_name]
-        ):
-            newProps = newProps + recordInfoByName[record_name]["infoProperties"]
-
-        if record_name in existingChannels:
-            """update existing record: exists but with a different hostName and/or iocName"""
-            existingChannel = existingChannels[record_name]
-            existingChannel["properties"] = __merge_property_lists(
-                newProps, existingChannel["properties"]
-            )
-            records.append(existingChannel)
-            _log.debug(
-                "Add existing record with different IOC: {s}".format(s=records[-1])
-            )
-            """in case, alias exists, update their properties too"""
-            if conf.get("alias", "default") == "on":
-                if (
-                    record_name in recordInfoByName
-                    and "aliases" in recordInfoByName[record_name]
-                ):
-                    alProps = [alias_property(owner, record_name)]
-                    for p in newProps:
-                        alProps.append(p)
-                    for alias in recordInfoByName[record_name]["aliases"]:
-                        if alias in existingChannels:
-                            ach = existingChannels[alias]
-                            ach["properties"] = __merge_property_lists(
-                                alProps, ach["properties"]
-                            )
-                            records.append(ach)
-                        else:
-                            records.append(
-                                {"name": alias, "owner": owner, "properties": alProps}
-                            )
-                        _log.debug(
-                            "Add existing alias with different IOC: {s}".format(
-                                s=records[-1]
-                            )
-                        )
-
-        else:
-            """New record"""
-            records.append(
-                {"name": record_name, "owner": owner, "properties": newProps}
-            )
-            _log.debug("Add new record: {s}".format(s=records[-1]))
-            if conf.get("alias", "default") == "on":
-                if (
-                    record_name in recordInfoByName
-                    and "aliases" in recordInfoByName[record_name]
-                ):
-                    alProps = [new_property("alias", owner, record_name)]
-                    for p in newProps:
-                        alProps.append(p)
-                    for alias in recordInfoByName[record_name]["aliases"]:
-                        records.append(
-                            {"name": alias, "owner": owner, "properties": alProps}
-                        )
-                        _log.debug("Add new alias: {s}".format(s=records[-1]))
-    _log.info(
-        "Total records to update: {nChannels} {iocName}".format(
-            nChannels=len(records), iocName=iocName
+            ),
+            cf_record["properties"],
         )
-    )
-    if len(records) != 0:
-        client.set(channels=records)
-    else:
-        if old_records and len(old_records) != 0:
-            client.set(channels=records)
-    if processor.cancelled:
-        raise defer.CancelledError()
+
+
+def update_records_delete_alias(
+    recordInfoByName: Dict[str, Dict[str, Any]],
+    owner: str,
+    iocTime: str,
+    records_dict: Dict[str, List[str]],
+    iocs: Dict[str, Dict[str, Any]],
+    conf: ConfigAdapter,
+    recceiverid: str,
+    records: List[Dict[str, Any]],
+    cf_record: Dict[str, Any],
+) -> None:
+    """Update and delete aliases for a record when IOC is down.
+
+    This function processes aliases associated with a channel finder record when its IOC
+    is down. It updates the properties of existing aliases and handles their deletion
+    if necessary.
+
+    Args:
+        recordInfoByName: Dictionary mapping record names to their detailed information
+        owner: Owner of the record properties
+        iocTime: Timestamp for the record update
+        records_dict: Dictionary mapping record names to list of IOC IDs
+        iocs: Dictionary containing IOC information including hostname, name, etc.
+        conf: Configuration adapter for accessing settings
+        recceiverid: Unique identifier for the receiver
+        records: List of records to be updated
+        cf_record: Channel finder record being processed
+
+    Returns:
+        None
+
+    Note:
+        The function modifies the records list in-place by appending updated aliases.
+        It also updates properties of existing aliases with new IOC information.
+    """
+    if (
+        cf_record["name"] in recordInfoByName
+        and "aliases" in recordInfoByName[cf_record["name"]]
+    ):
+        for alias in recordInfoByName[cf_record["name"]]["aliases"]:
+            if alias["name"] in records_dict:
+                alias["owner"] = iocs[records_dict[alias["name"]][-1]]["owner"]
+                alias["properties"] = __merge_property_lists(
+                    ch_create_properties(
+                        owner,
+                        iocTime,
+                        recceiverid,
+                        records_dict,
+                        iocs,
+                        cf_record,
+                    ),
+                    alias["properties"],
+                )
+                if conf.get("recordType"):
+                    cf_record["properties"] = __merge_property_lists(
+                        cf_record["properties"].append(
+                            recordType_property(
+                                owner,
+                                str(
+                                    iocs[records_dict[alias["name"]][-1]]["recordType"]
+                                ),
+                            )
+                        ),
+                        cf_record["properties"],
+                    )
+                records.append(alias)
+                _log.debug(
+                    "Add existing alias to previous IOC: {s}".format(s=records[-1])
+                )
 
 
 def new_property(name: str, owner: str, value: str) -> Property:
+    """Create a new property dictionary with the specified attributes.
+
+    This function creates a standardized property dictionary used throughout
+    the channel finder service.
+
+    Args:
+        name: Name of the property
+        owner: Owner of the property
+        value: Value associated with the property
+
+    Returns:
+        Property: A dictionary containing name, owner, and value keys
+
+    Example:
+        >>> prop = new_property("status", "admin", "active")
+        >>> print(prop)
+        {'name': 'status', 'owner': 'admin', 'value': 'active'}
+    """
     return {"name": name, "owner": owner, "value": value}
 
 
 def alias_property(owner: str, value: str) -> Property:
+    """Create a new alias property.
+
+    This function creates a property dictionary specifically for aliases,
+    using the standard property structure.
+
+    Args:
+        owner: Owner of the alias property
+        value: Value of the alias (typically the original record name)
+
+    Returns:
+        Property: A dictionary containing the alias property information
+
+    Example:
+        >>> prop = alias_property("admin", "original_record_name")
+        >>> print(prop)
+        {'name': 'alias', 'owner': 'admin', 'value': 'original_record_name'}
+    """
     return new_property("alias", owner, value)
 
 
 def pvStatus_property(owner: str, value: str) -> Property:
+    """Create a new PV status property.
+
+    This function creates a property dictionary specifically for PV status,
+    using the standard property structure.
+
+    Args:
+        owner: Owner of the status property
+        value: Status value (typically 'Active' or 'Inactive')
+
+    Returns:
+        Property: A dictionary containing the PV status property information
+
+    Example:
+        >>> prop = pvStatus_property("admin", "Active")
+        >>> print(prop)
+        {'name': 'pvStatus', 'owner': 'admin', 'value': 'Active'}
+    """
     return new_property("pvStatus", owner, value)
 
 
 def active_property(owner: str) -> Property:
+    """Create a property indicating an active PV status.
+
+    This is a convenience function that creates a PV status property
+    with the value 'Active'.
+
+    Args:
+        owner: Owner of the status property
+
+    Returns:
+        Property: A dictionary containing the active status property
+
+    Example:
+        >>> prop = active_property("admin")
+        >>> print(prop)
+        {'name': 'pvStatus', 'owner': 'admin', 'value': 'Active'}
+    """
     return pvStatus_property(owner, "Active")
 
 
 def inactive_property(owner: str) -> Property:
+    """Create a property indicating an inactive PV status.
+
+    This is a convenience function that creates a PV status property
+    with the value 'Inactive'.
+
+    Args:
+        owner: Owner of the status property
+
+    Returns:
+        Property: A dictionary containing the inactive status property
+
+    Example:
+        >>> prop = inactive_property("admin")
+        >>> print(prop)
+        {'name': 'pvStatus', 'owner': 'admin', 'value': 'Inactive'}
+    """
     return pvStatus_property(owner, "Inactive")
 
 
 def recordType_property(owner: str, value: str) -> Property:
+    """Create a property specifying the record type.
+
+    This function creates a property dictionary specifically for record types,
+    using the standard property structure.
+
+    Args:
+        owner: Owner of the record type property
+        value: The record type value
+
+    Returns:
+        Property: A dictionary containing the record type property information
+
+    Example:
+        >>> prop = recordType_property("admin", "ai")
+        >>> print(prop)
+        {'name': 'recordType', 'owner': 'admin', 'value': 'ai'}
+    """
     return new_property("recordType", owner, value)
 
 
 def time_property(owner: str, value: str) -> Property:
+    """Create a property for timestamp information.
+
+    This function creates a property dictionary specifically for timestamps,
+    using the standard property structure.
+
+    Args:
+        owner: Owner of the time property
+        value: The timestamp value
+
+    Returns:
+        Property: A dictionary containing the time property information
+
+    Example:
+        >>> prop = time_property("admin", "2024-03-14T12:00:00")
+        >>> print(prop)
+        {'name': 'time', 'owner': 'admin', 'value': '2024-03-14T12:00:00'}
+    """
     return new_property("time", owner, value)
 
 
-def create_properties(owner, iocTime, recceiverid, hostName, iocName, iocIP, iocid):
+def create_properties(
+    owner: str,
+    iocTime: str,
+    recceiverid: str,
+    hostName: str,
+    iocName: str,
+    iocIP: str,
+    iocid: str,
+) -> List[Property]:
+    """Create a standard set of properties for a channel finder record.
+
+    This function creates a list of essential properties that every channel finder
+    record should have, including host information, IOC details, and status.
+
+    Args:
+        owner: Owner of the properties
+        iocTime: Timestamp for the record
+        recceiverid: Unique identifier for the receiver
+        hostName: Name of the host machine
+        iocName: Name of the IOC
+        iocIP: IP address of the IOC
+        iocid: Unique identifier for the IOC
+
+    Returns:
+        List[Property]: A list of property dictionaries containing all standard properties
+
+    Note:
+        The returned properties include: hostName, iocName, iocid, iocIP, pvStatus,
+        time, and recceiverid.
+    """
     return [
         new_property("hostName", owner, hostName),
         new_property("iocName", owner, iocName),
@@ -947,7 +1246,34 @@ def create_properties(owner, iocTime, recceiverid, hostName, iocName, iocIP, ioc
     ]
 
 
-def ch_create_properties(owner, iocTime, recceiverid, records_dict, iocs, cf_record):
+def ch_create_properties(
+    owner: str,
+    iocTime: str,
+    recceiverid: str,
+    records_dict: Dict[str, List[str]],
+    iocs: Dict[str, Dict[str, Any]],
+    cf_record: Dict[str, Any],
+) -> List[Property]:
+    """Create channel-specific properties using IOC information.
+
+    This function creates a list of properties for a specific channel by looking up
+    IOC information from the records dictionary and IOCs dictionary.
+
+    Args:
+        owner: Owner of the properties
+        iocTime: Timestamp for the record
+        recceiverid: Unique identifier for the receiver
+        records_dict: Dictionary mapping record names to list of IOC IDs
+        iocs: Dictionary containing IOC information
+        cf_record: Channel finder record being processed
+
+    Returns:
+        List[Property]: A list of property dictionaries for the channel
+
+    Note:
+        This function uses the last IOC in the records_dict list for the record
+        to determine the property values.
+    """
     return create_properties(
         owner,
         iocTime,
@@ -959,11 +1285,28 @@ def ch_create_properties(owner, iocTime, recceiverid, records_dict, iocs, cf_rec
     )
 
 
-def __merge_property_lists(newProperties, oldProperties):
-    """
-    Merges two lists of properties ensuring that there are no 2 properties with
-    the same name In case of overlap between the new and old property lists the
-    new property list wins out
+def __merge_property_lists(
+    newProperties: List[Property],
+    oldProperties: List[Property],
+) -> List[Property]:
+    """Merge two property lists ensuring no duplicates.
+
+    This function combines two lists of properties while ensuring that no duplicate
+    property names exist in the final list. Properties from newProperties take
+    precedence over those in oldProperties.
+
+    Args:
+        newProperties: List of new properties to add
+        oldProperties: List of existing properties
+
+    Returns:
+        List[Property]: A merged list of properties with no duplicates
+
+    Example:
+        >>> new_props = [{'name': 'status', 'owner': 'admin', 'value': 'active'}]
+        >>> old_props = [{'name': 'type', 'owner': 'admin', 'value': 'ai'}]
+        >>> merged = __merge_property_lists(new_props, old_props)
+        >>> print(len(merged))  # Will be 2 as properties have different names
     """
     newPropNames = [p["name"] for p in newProperties]
     for oldProperty in oldProperties:
@@ -972,13 +1315,48 @@ def __merge_property_lists(newProperties, oldProperties):
     return newProperties
 
 
-def getCurrentTime(timezone=False):
+def getCurrentTime(timezone: bool = False) -> str:
+    """Get current timestamp optionally with timezone information.
+
+    This function returns the current time as a string. If timezone is True,
+    it includes the timezone information in the returned string.
+
+    Args:
+        timezone: Whether to include timezone information in the output
+
+    Returns:
+        str: Current timestamp as string, optionally with timezone information
+
+    Example:
+        >>> print(getCurrentTime())  # '2024-03-14 12:00:00'
+        >>> print(getCurrentTime(True))  # '2024-03-14 12:00:00+01:00'
+    """
     if timezone:
         return str(datetime.datetime.now().astimezone())
     return str(datetime.datetime.now())
 
 
-def prepareFindArgs(conf, args, size=0):
+def prepareFindArgs(
+    conf: ConfigAdapter, args: List[tuple[str, Any]], size: int = 0
+) -> List[tuple[str, Any]]:
+    """Prepare arguments for channel finder search.
+
+    This function processes search arguments and applies size limits based on
+    configuration. It modifies the search arguments to include size limitations
+    if specified in the configuration.
+
+    Args:
+        conf: Configuration adapter for accessing settings
+        args: List of search arguments as (key, value) tuples
+        size: Default size limit for results (overridden by configuration)
+
+    Returns:
+        List[tuple[str, Any]]: Modified list of search arguments
+
+    Note:
+        If a size limit is specified in the configuration (findSizeLimit),
+        it will be added to the arguments list with the '~size' key.
+    """
     size_limit = int(conf.get("findSizeLimit", size))
     if size_limit > 0:
         args.append(("~size", size_limit))
@@ -989,14 +1367,40 @@ def poll(
     update_method,
     processor: CFProcessor,
     recordInfoByName: dict[str, dict[str, Any]],
-    records_to_delete,
+    records_to_delete: List[str],
     hostName: str,
     iocName: str,
     iocIP: str,
     iocid: str,
     owner: str,
     iocTime: str,
-):
+) -> bool:
+    """Poll for updates with retry mechanism.
+
+    This function attempts to update channel finder records with retry logic
+    in case of failures. It implements an exponential backoff strategy for
+    retries.
+
+    Args:
+        update_method: Function to call for updating records
+        processor: CFProcessor instance managing the updates
+        recordInfoByName: Dictionary of record information by name
+        records_to_delete: List of records to be deleted
+        hostName: Name of the host machine
+        iocName: Name of the IOC
+        iocIP: IP address of the IOC
+        iocid: Unique identifier for the IOC
+        owner: Owner of the records
+        iocTime: Timestamp for the update
+
+    Returns:
+        bool: True if update was successful, False otherwise
+
+    Note:
+        The function implements exponential backoff with a maximum retry
+        interval of 60 seconds. It will continue retrying indefinitely
+        until successful or interrupted.
+    """
     _log.info("Polling {iocName} begins...".format(iocName=iocName))
     sleep = 1
     success = False
@@ -1026,3 +1430,4 @@ def poll(
             time.sleep(retry_seconds)
             sleep *= 1.5
     _log.info("Polling {iocName} complete".format(iocName=iocName))
+    return False
