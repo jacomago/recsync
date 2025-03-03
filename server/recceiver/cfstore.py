@@ -134,14 +134,15 @@ class CFProcessor(service.Service):
         """Start the CFProcessor service.
 
         Raises:
-            ResourceError: If unable to acquire required resources
-            ChannelFinderError: If unable to connect to ChannelFinder service
+            ResourceError: If unable to acquire required resources like locks
+            ChannelFinderError: If unable to connect to or configure ChannelFinder service
+            ConfigurationError: If service configuration is invalid
         """
-        service.Service.startService(self)
-
         try:
+            service.Service.startService(self)
+
             # Returning a Deferred is not supported by startService(),
-            # so instead attempt to acquire the lock synchonously!
+            # so instead attempt to acquire the lock synchronously
             d = self.lock.acquire()
             if not d.called:
                 d.cancel()
@@ -152,38 +153,77 @@ class CFProcessor(service.Service):
 
             try:
                 self._startServiceWithLock()
-            except Exception as e:
+            except ChannelFinderError as e:
                 raise ChannelFinderError(f"Failed to start service: {str(e)}") from e
+            except ConfigurationError as e:
+                raise ConfigurationError(
+                    f"Invalid configuration during service start: {str(e)}"
+                ) from e
+            except Exception as e:
+                raise ChannelFinderError(
+                    f"Unexpected error during service start: {str(e)}"
+                ) from e
             finally:
                 self.lock.release()
-        except Exception:
-            service.Service.stopService(self)
+
+        except (ResourceError, ChannelFinderError, ConfigurationError):
+            # Re-raise these custom exceptions without wrapping
             raise
+        except Exception as e:
+            # Wrap any other unexpected exceptions
+            raise ChannelFinderError(
+                f"Unexpected error during service startup: {str(e)}"
+            ) from e
+        finally:
+            # Ensure service is stopped if any error occurs during startup
+            if not self.running:
+                service.Service.stopService(self)
 
     def _startServiceWithLock(self):
         """Initialize the service with acquired lock.
 
+        This method initializes the ChannelFinder client and sets up required properties.
+        It is called by startService after acquiring the lock.
+
         Raises:
             ChannelFinderError: If unable to connect to or configure ChannelFinder
-            ConfigurationError: If configuration is invalid
+            ConfigurationError: If configuration is invalid or missing required settings
         """
         _log.info("CF_START")
 
         if self.client is None:  # For setting up mock test client
             try:
-                self.client = ChannelFinderClient()
+                # Initialize ChannelFinder client
+                try:
+                    self.client = ChannelFinderClient()
+                except Exception as e:
+                    raise ChannelFinderError(
+                        "Failed to create ChannelFinder client"
+                    ) from e
 
-                cf_properties = self.fetch_cf_property_names()
+                # Fetch and validate properties
+                try:
+                    cf_properties = self.fetch_cf_property_names()
+                except Exception as e:
+                    raise ChannelFinderError(
+                        "Failed to fetch ChannelFinder properties"
+                    ) from e
+
                 required_properties = DEFAULT_RECORD_PROPERTY_NAMES
 
-                configured_properties = self.read_conf_properties(self.conf)
-                record_property_names_list = self.read_conf_record_properties(self.conf)
+                try:
+                    configured_properties = self.read_conf_properties(self.conf)
+                    record_property_names_list = self.read_conf_record_properties(
+                        self.conf
+                    )
+                except Exception as e:
+                    raise ConfigurationError(
+                        "Failed to read configuration properties"
+                    ) from e
 
+                # Update properties in ChannelFinder
                 required_properties.update(configured_properties)
-                # Are any required properties not already present on CF?
                 properties = required_properties - set(cf_properties)
-                # Are any whitelisted properties not already present on CF?
-                # If so, add them too.
                 properties.update(set(record_property_names_list) - set(cf_properties))
 
                 owner: str = self.conf.get("username", "cfstore")
@@ -201,20 +241,26 @@ class CFProcessor(service.Service):
                         self.record_property_names_list
                     )
                 )
+
             except ConnectionError as e:
                 _log.exception("Cannot connect to Channelfinder service")
                 raise ChannelFinderError(
                     "Cannot connect to Channelfinder service"
                 ) from e
+            except (ChannelFinderError, ConfigurationError):
+                # Re-raise custom exceptions
+                raise
             except Exception as e:
+                # Wrap unexpected exceptions
                 raise ChannelFinderError(f"Error initializing service: {str(e)}") from e
-            else:
-                if self.conf.getboolean("cleanOnStart", True):
-                    try:
-                        self.clean_service()
-                    except Exception as e:
-                        _log.error(f"Failed to clean service on start: {str(e)}")
-                        # Don't raise here as this is not critical for service start
+
+            # Clean service if configured
+            if self.conf.getboolean("cleanOnStart", True):
+                try:
+                    self.clean_service()
+                except Exception as e:
+                    # Log but don't fail startup for cleaning errors
+                    _log.error(f"Failed to clean service on start: {str(e)}")
 
     def read_conf_properties(self, conf: ConfigAdapter) -> set[str]:
         required_properties = set()
@@ -650,7 +696,7 @@ def dict_to_file(dict, iocs, conf):
 def __updateCF__(
     processor: CFProcessor,
     recordInfoByName: dict[str, dict[str, Any]],
-    records_to_delete,
+    records_to_delete: List[str],
     hostName: str,
     iocName: str,
     iocIP: str,
