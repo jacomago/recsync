@@ -327,47 +327,91 @@ class CFProcessor(service.Service):
             self.clean_service()
         _log.info("CF_STOP with lock")
 
-    # @defer.inlineCallbacks # Twisted v16 does not support cancellation!
     def commit(self, transaction_record):
+        """Commit a transaction to the ChannelFinder service.
+
+        Args:
+            transaction_record: Transaction record to commit
+
+        Returns:
+            Deferred: A deferred that will fire when the commit is complete
+
+        Raises:
+            ResourceError: If unable to acquire the lock
+            ChannelFinderError: If there is an error communicating with ChannelFinder
+            ConfigurationError: If there is an error with the configuration
+        """
         return self.lock.run(self._commitWithLock, transaction_record)
 
     def _commitWithLock(self, transaction):
+        """Commit a transaction with an acquired lock.
+
+        Args:
+            transaction: Transaction to commit
+
+        Returns:
+            Deferred: A deferred that will fire when the commit is complete
+
+        Raises:
+            ChannelFinderError: If there is an error communicating with ChannelFinder
+            ConfigurationError: If there is an error with the configuration
+        """
         self.cancelled = False
 
-        t = deferToThread(self._commitWithThread, transaction)
+        try:
+            t = deferToThread(self._commitWithThread, transaction)
 
-        def cancelCommit(d):
-            self.cancelled = True
-            d.callback(None)
+            def cancelCommit(d):
+                self.cancelled = True
+                d.callback(None)
 
-        d = defer.Deferred(cancelCommit)
+            d = defer.Deferred(cancelCommit)
 
-        def waitForThread(_ignored):
-            if self.cancelled:
-                return t
+            def waitForThread(_ignored):
+                if self.cancelled:
+                    return t
 
-        d.addCallback(waitForThread)
+            d.addCallback(waitForThread)
 
-        def chainError(err):
-            if not err.check(defer.CancelledError):
-                _log.error("CF_COMMIT FAILURE: {s}".format(s=err))
-            if self.cancelled:
+            def chainError(err):
                 if not err.check(defer.CancelledError):
+                    _log.error("CF_COMMIT FAILURE: {s}".format(s=err))
+                    if isinstance(err.value, CFStoreException):
+                        # Re-raise custom exceptions
+                        raise err.value
+                    else:
+                        # Wrap unexpected errors
+                        raise ChannelFinderError(f"Commit failed: {str(err)}") from err
+                if self.cancelled:
+                    if not err.check(defer.CancelledError):
+                        raise defer.CancelledError()
+                    return err
+                else:
+                    d.callback(None)
+
+            def chainResult(_ignored):
+                if self.cancelled:
                     raise defer.CancelledError()
-                return err
-            else:
-                d.callback(None)
+                else:
+                    d.callback(None)
 
-        def chainResult(_ignored):
-            if self.cancelled:
-                raise defer.CancelledError()
-            else:
-                d.callback(None)
-
-        t.addCallbacks(chainResult, chainError)
-        return d
+            t.addCallbacks(chainResult, chainError)
+            return d
+        except Exception as e:
+            raise ChannelFinderError(f"Error setting up commit: {str(e)}") from e
 
     def _commitWithThread(self, transaction):
+        """Execute the commit in a separate thread.
+
+        Args:
+            transaction: Transaction to commit
+
+        Raises:
+            ChannelFinderError: If there is an error communicating with ChannelFinder
+            ConfigurationError: If there is an error with the configuration
+            ValidationError: If transaction data is invalid
+            defer.CancelledError: If the commit is cancelled
+        """
         if not self.running:
             raise defer.CancelledError(
                 "CF Processor is not running (transaction: {host}:{port})",
@@ -376,62 +420,76 @@ class CFProcessor(service.Service):
             )
 
         _log.info("CF_COMMIT: {transaction}".format(transaction=transaction))
-        """
-        a dictionary with a list of records with their associated property info
-        pvInfo
-        {record_id: { "pvName":"recordName",
-                "infoProperties":{propName:value, ...}}}
-        """
 
-        host, iocName, hostName, owner, time, iocid = self.read_transaction_ioc_info(
-            transaction
-        )
+        try:
+            # Validate transaction data
+            if not hasattr(transaction, "source_address"):
+                raise ValidationError("Transaction missing source address")
 
-        records_details = self.read_transaction_names_types(transaction)
+            host, iocName, hostName, owner, time, iocid = (
+                self.read_transaction_ioc_info(transaction)
+            )
 
-        records_infos = self.read_transaction_record_infos_to_add(
-            transaction, owner, iocid, records_details
-        )
-        for record_id, record_info in records_infos.items():
-            records_details[record_id]["infoProperties"] = record_info
+            if not all([host, iocName, hostName, owner, time, iocid]):
+                raise ValidationError("Missing required IOC information in transaction")
 
-        record_aliases = self.read_transaction_aliases(
-            transaction, iocid, records_details
-        )
-        for record_id, record_alias in record_aliases.items():
-            records_details[record_id]["aliases"] = record_alias
+            records_details = self.read_transaction_names_types(transaction)
 
-        self.read_transaction_client_infos(transaction, iocName, owner, records_details)
+            records_infos = self.read_transaction_record_infos_to_add(
+                transaction, owner, iocid, records_details
+            )
+            for record_id, record_info in records_infos.items():
+                records_details[record_id]["infoProperties"] = record_info
 
-        records_to_delete = list(transaction.records_to_delete)
-        _log.debug("Delete records: {s}".format(s=records_to_delete))
-        if not transaction.connected:
-            records_to_delete.extend(self.records_dict.keys())
+            record_aliases = self.read_transaction_aliases(
+                transaction, iocid, records_details
+            )
+            for record_id, record_alias in record_aliases.items():
+                records_details[record_id]["aliases"] = record_alias
 
-        record_details_by_name = self.convert_record_infos_to_by_name(
-            iocid, records_details
-        )
+            self.read_transaction_client_infos(
+                transaction, iocName, owner, records_details
+            )
 
-        if transaction.initial:
-            self.add_ioc(host, iocName, hostName, owner, time, iocid)
+            records_to_delete = list(transaction.records_to_delete)
+            _log.debug("Delete records: {s}".format(s=records_to_delete))
+            if not transaction.connected:
+                records_to_delete.extend(self.records_dict.keys())
 
-        self.update_ioc_channel_counts_records_ioc_info(
-            iocid, records_to_delete, record_details_by_name
-        )
+            record_details_by_name = self.convert_record_infos_to_by_name(
+                iocid, records_details
+            )
 
-        poll(
-            __updateCF__,
-            self,
-            record_details_by_name,
-            records_to_delete,
-            hostName,
-            iocName,
-            host,
-            iocid,
-            owner,
-            time,
-        )
-        dict_to_file(self.records_dict, self.iocs, self.conf)
+            if transaction.initial:
+                self.add_ioc(host, iocName, hostName, owner, time, iocid)
+
+            self.update_ioc_channel_counts_records_ioc_info(
+                iocid, records_to_delete, record_details_by_name
+            )
+
+            poll(
+                __updateCF__,
+                self,
+                record_details_by_name,
+                records_to_delete,
+                hostName,
+                iocName,
+                host,
+                iocid,
+                owner,
+                time,
+            )
+            dict_to_file(self.records_dict, self.iocs, self.conf)
+
+        except ValidationError:
+            # Re-raise validation errors
+            raise
+        except RequestException as e:
+            raise ChannelFinderError(
+                f"Error communicating with ChannelFinder: {str(e)}"
+            ) from e
+        except Exception as e:
+            raise ChannelFinderError(f"Unexpected error during commit: {str(e)}") from e
 
     def update_ioc_channel_counts_records_ioc_info(
         self,
@@ -544,136 +602,319 @@ class CFProcessor(service.Service):
         iocid: str,
         recordInfo: dict[str, dict[str, str]],
     ) -> dict[str, list[Property]]:
-        records_infos: dict[str, list[Property]] = {}
-        for record_id, (record_infos_to_add) in transaction.record_infos_to_add.items():
-            # find intersection of these sets
-            if record_id not in recordInfo:
-                _log.warning(
-                    "IOC: {iocid}: PV not found for recinfo with RID: {record_id}".format(
-                        iocid=iocid, record_id=record_id
-                    )
-                )
-                continue
-            recinfo_wl = [
-                p
-                for p in self.record_property_names_list
-                if p in record_infos_to_add.keys()
-            ]
-            if recinfo_wl:
-                records_infos[record_id] = list()
-                for infotag in recinfo_wl:
-                    property = new_property(
-                        infotag,
-                        owner,
-                        record_infos_to_add[infotag],
-                    )
-                    records_infos[record_id].append(property)
+        """Read additional record information from a transaction.
 
-        return records_infos
+        Args:
+            transaction: Transaction containing record information
+            owner: Owner of the records
+            iocid: ID of the IOC
+            recordInfo: Existing record information
+
+        Returns:
+            dict: Dictionary mapping record IDs to property lists
+
+        Raises:
+            ValidationError: If record information is invalid
+            ConfigurationError: If property configuration is invalid
+        """
+        try:
+            records_infos: dict[str, list[Property]] = {}
+            for (
+                record_id,
+                record_infos_to_add,
+            ) in transaction.record_infos_to_add.items():
+                if record_id not in recordInfo:
+                    _log.warning(
+                        "IOC: {iocid}: PV not found for recinfo with RID: {record_id}".format(
+                            iocid=iocid, record_id=record_id
+                        )
+                    )
+                    continue
+
+                # find intersection of these sets
+                recinfo_wl = [
+                    p
+                    for p in self.record_property_names_list
+                    if p in record_infos_to_add.keys()
+                ]
+
+                if recinfo_wl:
+                    records_infos[record_id] = []
+                    for infotag in recinfo_wl:
+                        if not record_infos_to_add[infotag]:
+                            raise ValidationError(
+                                f"Missing value for property {infotag} in record {record_id}"
+                            )
+                        property = new_property(
+                            infotag,
+                            owner,
+                            record_infos_to_add[infotag],
+                        )
+                        records_infos[record_id].append(property)
+
+            return records_infos
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError(f"Error reading record information: {str(e)}") from e
 
     def read_transaction_names_types(
         self, transaction: interfaces.ITransaction
     ) -> dict[str, dict[str, Any]]:
-        recordInfo = {}
-        for record_id, (record_name, record_type) in transaction.records_to_add.items():
-            recordInfo[record_id] = {"pvName": record_name}
-            if self.conf.get("recordType", "default" == "on"):
-                recordInfo[record_id]["recordType"] = record_type
-        return recordInfo
+        """Read record names and types from a transaction.
+
+        Args:
+            transaction: Transaction containing record information
+
+        Returns:
+            dict: Dictionary mapping record IDs to record information
+
+        Raises:
+            ValidationError: If record information is invalid
+            ConfigurationError: If record type configuration is invalid
+        """
+        try:
+            recordInfo = {}
+            for record_id, (
+                record_name,
+                record_type,
+            ) in transaction.records_to_add.items():
+                if not record_name:
+                    raise ValidationError(f"Missing record name for ID: {record_id}")
+
+                recordInfo[record_id] = {"pvName": record_name}
+
+                if self.conf.get("recordType", "default") == "on":
+                    if not record_type:
+                        raise ValidationError(
+                            f"Missing record type for record: {record_name}"
+                        )
+                    recordInfo[record_id]["recordType"] = record_type
+
+            return recordInfo
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError(
+                f"Error reading record names and types: {str(e)}"
+            ) from e
 
     def read_transaction_ioc_info(self, transaction: interfaces.ITransaction):
-        host: str = transaction.source_address.host
-        port: int = transaction.source_address.port
-        iocName: str = (
-            transaction.client_infos.get("IOCNAME") or transaction.source_address.port
-        )
-        hostName: str = (
-            transaction.client_infos.get("HOSTNAME") or transaction.source_address.host
-        )
-        owner: str = (
-            transaction.client_infos.get("ENGINEER")
-            or transaction.client_infos.get("CF_USERNAME")
-            or self.conf.get("username", "cfstore")
-        )
-        time: str = self.currentTime(timezone=self.conf.get("timezone", None))
+        """Read IOC information from a transaction.
 
-        """The unique identifier for a particular IOC"""
-        iocid: str = host + ":" + str(port)
-        return host, iocName, hostName, owner, time, iocid
+        Args:
+            transaction: Transaction containing IOC information
 
-    def remove_channel(self, recordName, iocid):
-        self.records_dict[recordName].remove(iocid)
-        if iocid in self.iocs:
-            self.iocs[iocid]["channelcount"] -= 1
-        if self.iocs[iocid]["channelcount"] == 0:
-            self.iocs.pop(iocid, None)
-        elif self.iocs[iocid]["channelcount"] < 0:
-            _log.error("Channel count negative: {s}", s=iocid)
-        if len(self.records_dict[recordName]) <= 0:  # case: record has no more iocs
-            del self.records_dict[recordName]
+        Returns:
+            tuple: (host, iocName, hostName, owner, time, iocid)
 
-    def clean_service(self):
+        Raises:
+            ValidationError: If required IOC information is missing or invalid
         """
-        Marks all records as "Inactive" until the recsync server is back up
+        try:
+            if not transaction.source_address:
+                raise ValidationError("Transaction missing source address")
+
+            host: str = transaction.source_address.host
+            port: int = transaction.source_address.port
+
+            if not host or not isinstance(port, int):
+                raise ValidationError("Invalid source address in transaction")
+
+            iocName: str = (
+                transaction.client_infos.get("IOCNAME")
+                or transaction.source_address.port
+            )
+            hostName: str = (
+                transaction.client_infos.get("HOSTNAME")
+                or transaction.source_address.host
+            )
+            owner: str = (
+                transaction.client_infos.get("ENGINEER")
+                or transaction.client_infos.get("CF_USERNAME")
+                or self.conf.get("username", "cfstore")
+            )
+            time: str = self.currentTime(timezone=self.conf.get("timezone", None))
+
+            """The unique identifier for a particular IOC"""
+            iocid: str = host + ":" + str(port)
+
+            return host, iocName, hostName, owner, time, iocid
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError(f"Error reading IOC information: {str(e)}") from e
+
+    def remove_channel(self, recordName: str, iocid: str) -> None:
+        """Remove a channel from the records dictionary and update IOC channel count.
+
+        Args:
+            recordName: Name of the record to remove
+            iocid: ID of the IOC the record belongs to
+
+        Raises:
+            ValidationError: If record or IOC information is invalid
+            ResourceError: If channel count becomes invalid
+        """
+        try:
+            if not recordName or not iocid:
+                raise ValidationError("Record name and IOC ID are required")
+
+            if recordName not in self.records_dict:
+                raise ValidationError(
+                    f"Record {recordName} not found in records dictionary"
+                )
+
+            if iocid not in self.records_dict[recordName]:
+                raise ValidationError(f"IOC {iocid} not found for record {recordName}")
+
+            self.records_dict[recordName].remove(iocid)
+
+            if iocid in self.iocs:
+                self.iocs[iocid]["channelcount"] -= 1
+                if self.iocs[iocid]["channelcount"] == 0:
+                    self.iocs.pop(iocid, None)
+                elif self.iocs[iocid]["channelcount"] < 0:
+                    raise ResourceError(f"Channel count negative for IOC: {iocid}")
+
+            if len(self.records_dict[recordName]) <= 0:  # case: record has no more iocs
+                del self.records_dict[recordName]
+
+        except (ValidationError, ResourceError):
+            raise
+        except Exception as e:
+            raise ResourceError(f"Error removing channel: {str(e)}") from e
+
+    def clean_service(self) -> None:
+        """Mark all records as "Inactive" until the recsync server is back up.
+
+        This method implements a retry mechanism with exponential backoff.
+
+        Raises:
+            ChannelFinderError: If unable to communicate with ChannelFinder
+            ConfigurationError: If configuration is invalid
         """
         sleep = 1
         retry_limit = 5
-        owner = self.conf.get("username", "cfstore")
-        recceiverid = self.conf.get(RECCEIVERID_KEY, RECCEIVERID_DEFAULT)
-        while 1:
-            try:
-                _log.info("CF Clean Started")
-                records = self.get_active_channels(recceiverid)
-                if records is not None:
-                    while records is not None and len(records) > 0:
-                        self.clean_channels(owner, records)
-                        records = self.get_active_channels(recceiverid)
-                    _log.info("CF Clean Completed")
-                    return
-                else:
-                    _log.info("CF Clean Completed")
-                    return
-            except RequestException as e:
-                _log.error("Clean service failed: {s}".format(s=e))
-            retry_seconds = min(60, sleep)
-            _log.info(
-                "Clean service retry in {retry_seconds} seconds".format(
-                    retry_seconds=retry_seconds
+        try:
+            owner = self.conf.get("username", "cfstore")
+            if not owner:
+                raise ConfigurationError("Missing username in configuration")
+
+            recceiverid = self.conf.get(RECCEIVERID_KEY, RECCEIVERID_DEFAULT)
+
+            while True:
+                try:
+                    _log.info("CF Clean Started")
+                    records = self.get_active_channels(recceiverid)
+
+                    if records is not None:
+                        while records is not None and len(records) > 0:
+                            self.clean_channels(owner, records)
+                            records = self.get_active_channels(recceiverid)
+                        _log.info("CF Clean Completed")
+                        return
+                    else:
+                        _log.info("CF Clean Completed")
+                        return
+
+                except RequestException as e:
+                    _log.error("Clean service failed: {s}".format(s=e))
+                    if not self.running or sleep >= retry_limit:
+                        raise ChannelFinderError(
+                            f"Clean service failed after {retry_limit} retries"
+                        ) from e
+
+                    retry_seconds = min(60, sleep)
+                    _log.info(
+                        "Clean service retry in {retry_seconds} seconds".format(
+                            retry_seconds=retry_seconds
+                        )
+                    )
+                    time.sleep(retry_seconds)
+                    sleep *= 1.5
+
+        except (ChannelFinderError, ConfigurationError):
+            raise
+        except Exception as e:
+            raise ChannelFinderError(
+                f"Unexpected error during clean service: {str(e)}"
+            ) from e
+
+    def get_active_channels(self, recceiverid: str) -> List[Dict[str, Any]] | None:
+        """Get all active channels for a given receiver ID.
+
+        Args:
+            recceiverid: ID of the receiver to get channels for
+
+        Returns:
+            List[Dict[str, Any]] | None: List of active channels or None if none found
+
+        Raises:
+            ChannelFinderError: If unable to communicate with ChannelFinder
+        """
+        try:
+            return self.client.findByArgs(
+                prepareFindArgs(
+                    self.conf, [("pvStatus", "Active"), (RECCEIVERID_KEY, recceiverid)]
                 )
             )
-            time.sleep(retry_seconds)
-            sleep *= 1.5
-            if self.running == 0 and sleep >= retry_limit:
-                _log.info(
-                    "Abandoning clean after {retry_limit} seconds".format(
-                        retry_limit=retry_limit
-                    )
-                )
+        except RequestException as e:
+            raise ChannelFinderError(
+                f"Failed to fetch active channels: {str(e)}"
+            ) from e
+        except Exception as e:
+            raise ChannelFinderError(
+                f"Unexpected error fetching channels: {str(e)}"
+            ) from e
+
+    def clean_channels(self, owner: str, records: List[Dict[str, Any]]) -> None:
+        """Update channels to inactive status.
+
+        Args:
+            owner: Owner of the channels
+            records: List of channel records to update
+
+        Raises:
+            ValidationError: If input parameters are invalid
+            ChannelFinderError: If unable to update channels
+        """
+        try:
+            if not owner:
+                raise ValidationError("Owner is required")
+            if not records:
                 return
 
-    def get_active_channels(self, recceiverid):
-        return self.client.findByArgs(
-            prepareFindArgs(
-                self.conf, [("pvStatus", "Active"), (RECCEIVERID_KEY, recceiverid)]
-            )
-        )
+            new_channels = []
+            for cf_record in records:
+                if "name" not in cf_record:
+                    raise ValidationError(f"Missing name in record: {cf_record}")
+                new_channels.append(cf_record["name"])
 
-    def clean_channels(self, owner, records):
-        new_channels = []
-        for cf_record in records or []:
-            new_channels.append(cf_record["name"])
-        _log.info(
-            "Total records to update: {nChannels}".format(nChannels=len(new_channels))
-        )
-        _log.debug(
-            'Update "pvStatus" property to "Inactive" for {n_channels} records'.format(
-                n_channels=len(new_channels)
+            _log.info(
+                "Total records to update: {nChannels}".format(
+                    nChannels=len(new_channels)
+                )
             )
-        )
-        self.client.update(
-            property=new_property("pvStatus", owner, "Inactive"),
-            channelNames=new_channels,
-        )
+            _log.debug(
+                'Update "pvStatus" property to "Inactive" for {n_channels} records'.format(
+                    n_channels=len(new_channels)
+                )
+            )
+
+            self.client.update(
+                property=new_property("pvStatus", owner, "Inactive"),
+                channelNames=new_channels,
+            )
+
+        except RequestException as e:
+            raise ChannelFinderError(f"Failed to update channels: {str(e)}") from e
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ChannelFinderError(
+                f"Unexpected error updating channels: {str(e)}"
+            ) from e
 
 
 def dict_to_file(dict, iocs, conf):
