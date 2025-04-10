@@ -1,7 +1,46 @@
-include:
-  - docker/cf-compose.yml
 services:
-  recc:
+  cf:
+    extends:
+      file: docker/cf-compose.yml
+      service: cf
+    environment:
+      aa.enabled: true
+      aa.urls: "{'default': 'http://aa:8080'}"
+    networks:
+      - net-2-cf
+  elasticsearch:
+    extends:
+      file: docker/cf-compose.yml
+      service: elasticsearch
+    networks:
+      - net-2-cf
+  aa:
+    image: ghcr.io/archiver-appliance/epicsarchiverap:singletomcat-92c7e77
+    hostname: aa
+    networks:
+      - net-2-cf
+      - net-1-recc-1
+    ports:
+      - "17665:8080"
+    environment:
+      ARCHAPPL_APPLIANCES: /usr/local/tomcat/archappl_conf/singleappliances.xml
+    volumes:
+        - archapplconfig:/usr/local/tomcat/archappl_conf
+        - archapplstorage:/usr/local/tomcat/storage/
+  mariadb:
+    hostname: mariadb
+    image: mariadb
+    networks:
+      - net-2-cf
+    environment:
+      MYSQL_ROOT_PASSWORD: archappl
+      MYSQL_DATABASE: archappl
+      MYSQL_USER: archappl
+      MYSQL_PASSWORD: archappl
+    volumes:
+      - archappldata:/var/lib/mysql
+      - mariainit:/docker-entrypoint-initdb.d
+  recc1:
     image: ghcr.io/channelfinder/recsync/recceiver:latest
     depends_on:
       cf:
@@ -73,3 +112,23 @@ services:
 networks:
   net-1-recc-1:
     driver: bridge
+  net-2-cf:
+    driver: bridge
+volumes:
+
+  archapplconfig:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./docker/archappl/conf
+      o: bind
+
+  archapplstorage:
+  archappldata:
+    driver: local
+  mariainit:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./docker/archappl/conf/sql
+      o: bind

@@ -37,8 +37,10 @@ log_cli_level = "DEBUG"
 [tool.ruff]
 line-length = 120
 
+
 [tool.ruff.lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
 # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
 # McCabe complexity (`C901`) by default.
 select = ["E", "F", "I"]
+exclude = ["docker/*"]
