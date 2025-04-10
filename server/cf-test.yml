@@ -1,7 +1,7 @@
 include:
   - docker/cf-compose.yml
 services:
-  recc:
+  recc1:
     image: ghcr.io/channelfinder/recsync/recceiver:latest
     depends_on:
       cf:
