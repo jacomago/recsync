@@ -12,6 +12,10 @@ services:
     extends:
       file: docker/cf-compose.yml
       service: elasticsearch
+    depends_on:
+      aa:
+        condition: service_healthy
+        restart: true
     networks:
       - net-2-cf
   aa:
@@ -22,6 +26,16 @@ services:
       - net-1-recc-1
     ports:
       - "17665:8080"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: curl -s -f http://localhost:8080/mgmt/ui/index.html
+      start_period: 10s
+      interval: 10s
+      timeout: 120s
+      retries: 5
     environment:
       ARCHAPPL_APPLIANCES: /usr/local/tomcat/archappl_conf/singleappliances.xml
     volumes:
@@ -37,6 +51,12 @@ services:
       MYSQL_DATABASE: archappl
       MYSQL_USER: archappl
       MYSQL_PASSWORD: archappl
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 3
     volumes:
       - archappldata:/var/lib/mysql
       - mariainit:/docker-entrypoint-initdb.d
