@@ -12,9 +12,9 @@ INACTIVE_PROPERTY = {"name": "pvStatus", "owner": "admin", "value": "Inactive", 
 MAX_WAIT_SECONDS = 180
 TIME_PERIOD_INCREMENT = 2
 
-# (2 reccaster.db, 2 somerecords.db, 2 aliases in somerecords.db, 3 in test_base.db)
-BASE_ALIAS_COUNT = 2
-BASE_IOC_CHANNEL_COUNT = 2 + 2 + 3 + BASE_ALIAS_COUNT
+# (2 reccaster.db, 2 somerecords.db, 2 aliases in somerecords.db, 4 and 1 alias in test_base.db)
+BASE_ALIAS_COUNT = 2 + 1
+BASE_IOC_CHANNEL_COUNT = 2 + 2 + 4 + BASE_ALIAS_COUNT
 
 
 def channel_match(channel0, channel1, properties_to_match: list[str]):

@@ -14,6 +14,7 @@ DB += somerecords.db
 DB += test_base.db
 DB += test_remove_infotag.db
 DB += test_remove_channel.db
+DB += test_remove_alias.db
 #----------------------------------------------------
 # If <anyname>.db template is not named <anyname>*.template add
 # <anyname>_template = <templatename>
