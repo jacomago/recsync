@@ -13,6 +13,7 @@ include $(TOP)/configure/CONFIG
 DB += somerecords.db
 DB += test_base.db
 DB += test_remove_infotag.db
+DB += test_remove_channel.db
 #----------------------------------------------------
 # If <anyname>.db template is not named <anyname>*.template add
 # <anyname>_template = <templatename>

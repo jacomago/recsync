@@ -8,3 +8,9 @@ record(longout, "$(P)lo:base_record") {
   info("hello", "world")
   info("archive", "default")
 }
+
+record(longout, "$(P)lo:base_pv2") {
+  info("test", "testing")
+  info("hello", "world")
+  info("archive", "default")
+}
