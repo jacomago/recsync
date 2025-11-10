@@ -25,6 +25,7 @@ services:
     environment:
       - IOCSH_NAME=IOC1-1
     hostname: ioc1-1
+    command: ./demo /recsync/iocBoot/iocdemo/st_base.cmd
     networks:
       - net-1-recc-1
   ioc1-2:
