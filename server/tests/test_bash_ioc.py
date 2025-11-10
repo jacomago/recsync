@@ -70,7 +70,7 @@ class TestRemoveProperty:
         )
         docker_ioc.start()
 
-        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st_bugtest.cmd")
+        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st_remove_info_tag_after.cmd")
         # Detach by not waiting for the thread to finish
 
         LOG.debug("ioc1-1 restart")

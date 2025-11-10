@@ -7,7 +7,6 @@ envPaths
 configure/*.local
 
 dbd/
-db/
 
 
 .iocsh_history

@@ -26,6 +26,6 @@ addReccasterEnvVars("BUILDING")
 ## Load record instances
 dbLoadRecords("../../db/reccaster.db", "P=$(IOCSH_NAME):")
 dbLoadRecords("../../db/somerecords.db","P=$(IOCSH_NAME):")
-dbLoadRecords("../../db/archive_bugtest.db", "P=$(IOCSH_NAME):")
+dbLoadRecords("../../db/remove_info_tag_after.db", "P=$(IOCSH_NAME):")
 
 iocInit()
