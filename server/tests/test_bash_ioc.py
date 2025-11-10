@@ -92,19 +92,19 @@ class TestRemoveProperty:
 
         # Check ioc1-1 has ai:base_pv with info tag "archive"
         LOG.debug('Checking ioc1-1 has ai:base_pv with info tag "archive"')
-        archive_channel_name = "IOC1-1:ai:base_pv"
-        archive_channel = cf_client.find(name=archive_channel_name)
+        base_channel_name = "IOC1-1:ai:base_pv"
+        base_channel = cf_client.find(name=base_channel_name)
 
-        def get_len_archive_properties(archive_channel):
-            return len([prop for prop in archive_channel[0]["properties"] if prop["name"] == "archive"])
+        def get_len_archive_properties(base_channel):
+            return len([prop for prop in base_channel[0]["properties"] if prop["name"] == "archive"])
 
-        assert get_len_archive_properties(archive_channel) == 1
+        assert get_len_archive_properties(base_channel) == 1
 
         docker_ioc.stop()
         LOG.info("Waiting for channels to go inactive")
         assert wait_for_sync(
             cf_client,
-            lambda cf_client: check_channel_property(cf_client, name=archive_channel_name, prop=INACTIVE_PROPERTY),
+            lambda cf_client: check_channel_property(cf_client, name=base_channel_name, prop=INACTIVE_PROPERTY),
         )
         docker_ioc.start()
 
@@ -112,9 +112,54 @@ class TestRemoveProperty:
         # Detach by not waiting for the thread to finish
 
         LOG.debug("ioc1-1 restart")
-        assert wait_for_sync(cf_client, lambda cf_client: check_channel_property(cf_client, name=archive_channel_name))
+        assert wait_for_sync(cf_client, lambda cf_client: check_channel_property(cf_client, name=base_channel_name))
         LOG.debug("ioc1-1 has restarted and synced")
 
-        archive_channel = cf_client.find(name=archive_channel_name)
-        LOG.debug("archive channel: %s", archive_channel)
-        assert get_len_archive_properties(archive_channel) == 0
+        base_channel = cf_client.find(name=base_channel_name)
+        LOG.debug("archive channel: %s", base_channel)
+        assert get_len_archive_properties(base_channel) == 0
+
+
+class TestRemoveAlias:
+    def test_remove_alias(self, setup_compose: DockerCompose) -> None:  # noqa: F811
+        """
+        Test that the setup in the docker compose creates channels in channelfinder
+        """
+        ioc_container = setup_compose.get_container("ioc1-1")
+        docker_client = DockerClient()
+        docker_ioc = docker_client.containers.get(ioc_container.ID)
+        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st.cmd")
+
+        LOG.info("Waiting for channels to sync")
+        cf_client = create_client_and_wait(setup_compose, expected_channel_count=8)
+
+        # Check ioc1-1 has ai:base_pv with info tag "archive"
+        LOG.debug('Checking ioc1-1 has ai:base_pv3 has an alias"')
+        base_channel_name = "IOC1-1:ai:base_pv3:has_alias"
+        base_channel = cf_client.find(name=base_channel_name)
+        assert base_channel
+        base_channel_alias_name = "IOC1-1:ai:base_pv3:alias"
+        base_channel_alias = cf_client.find(name=base_channel_alias_name)
+        assert base_channel_alias
+
+        docker_ioc.stop()
+        LOG.info("Waiting for channels to go inactive")
+        assert wait_for_sync(
+            cf_client,
+            lambda cf_client: check_channel_property(cf_client, name=base_channel_name, prop=INACTIVE_PROPERTY),
+        )
+        docker_ioc.start()
+
+        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st_remove_alias.cmd")
+        # Detach by not waiting for the thread to finish
+
+        LOG.debug("ioc1-1 restart")
+        assert wait_for_sync(cf_client, lambda cf_client: check_channel_property(cf_client, name=base_channel_name))
+        LOG.debug("ioc1-1 has restarted and synced")
+
+        base_channel = cf_client.find(name=base_channel_name)
+        LOG.debug("base channel: %s", base_channel)
+        assert base_channel
+
+        base_channel_alias = cf_client.find(name=base_channel_alias_name)
+        assert not base_channel_alias

@@ -17,5 +17,4 @@ record(longout, "$(P)lo:base_pv2") {
 }
 
 record(longout, "$(P)lo:base_pv3") {
-  alias("$(P)lo:base_pv3:alias")
 }
