@@ -23,12 +23,9 @@ epicsEnvSet("SECTOR", "mysector")
 addReccasterEnvVars("CONTACT", "SECTOR")
 addReccasterEnvVars("BUILDING")
 
-addReccasterExcludePattern("*_", "*__")
-addReccasterExcludePattern("*exclude_this")
-
 ## Load record instances
 dbLoadRecords("../../db/reccaster.db", "P=$(IOCSH_NAME):")
 dbLoadRecords("../../db/somerecords.db","P=$(IOCSH_NAME):")
-dbLoadRecords("../../db/test_base.db", "P=$(IOCSH_NAME):")
+dbLoadRecords("../../db/test_remove_channel.db", "P=$(IOCSH_NAME):")
 
 iocInit()

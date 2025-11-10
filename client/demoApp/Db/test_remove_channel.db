@@ -1,10 +1,10 @@
 
-record(ai, "$(P)ai:archive") {
+record(ai, "$(P)ai:base_pv") {
   info("test", "testing")
   info("archive", "MONITOR@1")
 }
 
-record(longout, "$(P)lo:archive") {
+record(longout, "$(P)lo:base_pv") {
   info("test", "testing")
   info("hello", "world")
   info("archive", "default")

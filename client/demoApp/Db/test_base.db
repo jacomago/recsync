@@ -1,6 +1,7 @@
 
 record(ai, "$(P)ai:base_pv") {
   info("test", "testing")
+  info("archive", "MONITOR@1")
 }
 
 record(longout, "$(P)lo:base_pv") {

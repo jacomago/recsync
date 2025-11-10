@@ -39,6 +39,44 @@ def docker_exec_new_command(container: Container, command: str):
     log_thread.start()
 
 
+class TestRemoveChannel:
+    def test_remove_channel(self, setup_compose: DockerCompose) -> None:  # noqa: F811
+        """
+        Test that the setup in the docker compose creates channels in channelfinder
+        """
+        ioc_container = setup_compose.get_container("ioc1-1")
+        docker_client = DockerClient()
+        docker_ioc = docker_client.containers.get(ioc_container.ID)
+        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st.cmd")
+
+        LOG.info("Waiting for channels to sync")
+        cf_client = create_client_and_wait(setup_compose, expected_channel_count=8)
+
+        # Check ioc1-1 has ai:base_pv with info tag "archive"
+        LOG.debug('Checking ioc1-1 has ai:base_pv2"')
+        base_channel_name = "IOC1-1:ai:base_pv"
+        base_channel_test_name = "IOC1-1:ai:base_pv2"
+        base_channel = cf_client.find(name=base_channel_name)
+
+        docker_ioc.stop()
+        LOG.info("Waiting for channels to go inactive")
+        assert wait_for_sync(
+            cf_client,
+            lambda cf_client: check_channel_property(cf_client, name=base_channel_name, prop=INACTIVE_PROPERTY),
+        )
+        docker_ioc.start()
+
+        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st_remove_channel.cmd")
+        # Detach by not waiting for the thread to finish
+
+        LOG.debug("ioc1-1 restart")
+        assert wait_for_sync(cf_client, lambda cf_client: check_channel_property(cf_client, name=base_channel_name))
+        LOG.debug("ioc1-1 has restarted and synced")
+
+        base_channel = cf_client.find(name=base_channel_test_name)
+        assert ("pvStatus", "Inactive") in [(prop["name"], prop["value"]) for prop in base_channel[0]["properties"]]
+
+
 class TestRemoveProperty:
     def test_remove_property(self, setup_compose: DockerCompose) -> None:  # noqa: F811
         """
@@ -52,9 +90,9 @@ class TestRemoveProperty:
         LOG.info("Waiting for channels to sync")
         cf_client = create_client_and_wait(setup_compose, expected_channel_count=8)
 
-        # Check ioc1-1 has ai:archive with info tag "archive"
-        LOG.debug('Checking ioc1-1 has ai:archive with info tag "archive"')
-        archive_channel_name = "IOC1-1:ai:archive"
+        # Check ioc1-1 has ai:base_pv with info tag "archive"
+        LOG.debug('Checking ioc1-1 has ai:base_pv with info tag "archive"')
+        archive_channel_name = "IOC1-1:ai:base_pv"
         archive_channel = cf_client.find(name=archive_channel_name)
 
         def get_len_archive_properties(archive_channel):
