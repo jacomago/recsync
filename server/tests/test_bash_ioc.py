@@ -2,6 +2,7 @@ import logging
 import threading
 from pathlib import Path
 
+from channelfinder import ChannelFinderClient
 from testcontainers.compose import DockerCompose
 
 from docker import DockerClient
@@ -39,20 +40,44 @@ def docker_exec_new_command(container: Container, command: str):
     log_thread.start()
 
 
-class TestRemoveProperty:
-    def test_remove_property(self, setup_compose: DockerCompose) -> None:  # noqa: F811
-        """
-        Test that the setup in the docker compose creates channels in channelfinder
-        """
-        ioc_container = setup_compose.get_container("ioc1-1")
-        docker_client = DockerClient()
-        docker_ioc = docker_client.containers.get(ioc_container.ID)
-        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st_base.cmd")
+def start_ioc(setup_compose: DockerCompose) -> Container:
+    ioc_container = setup_compose.get_container("ioc1-1")
+    docker_client = DockerClient()
+    docker_ioc = docker_client.containers.get(ioc_container.ID)
+    docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st_base.cmd")
+    return docker_ioc
 
+
+def restart_ioc(
+    ioc_container: Container, cf_client: ChannelFinderClient, base_channel_name: str, new_st: str
+) -> Container:
+    ioc_container.stop()
+    LOG.info("Waiting for channels to go inactive")
+    assert wait_for_sync(
+        cf_client,
+        lambda cf_client: check_channel_property(cf_client, name=base_channel_name, prop=INACTIVE_PROPERTY),
+    )
+    ioc_container.start()
+
+    docker_exec_new_command(ioc_container, f"./demo /recsync/iocBoot/iocdemo/{new_st}.cmd")
+    # Detach by not waiting for the thread to finish
+
+    LOG.debug("ioc1-1 restart")
+    assert wait_for_sync(cf_client, lambda cf_client: check_channel_property(cf_client, name=base_channel_name))
+    LOG.debug("ioc1-1 has restarted and synced")
+
+
+class TestRemoveInfoTag:
+    def test_remove_infotag(self, setup_compose: DockerCompose) -> None:  # noqa: F811
+        """
+        Test that removing an infotag from a record works
+        """
+        # Arrange
+        docker_ioc = start_ioc(setup_compose)
         LOG.info("Waiting for channels to sync")
         cf_client = create_client_and_wait(setup_compose, expected_channel_count=8)
 
-        # Check ioc1-1 has ai:base_record with info tag "archive"
+        # Check before
         LOG.debug('Checking ioc1-1 has ai:base_record with info tag "archive"')
         base_channel_name = "IOC1-1:ai:base_record"
         base_channel = cf_client.find(name=base_channel_name)
@@ -62,21 +87,10 @@ class TestRemoveProperty:
 
         assert get_len_archive_properties(base_channel) == 1
 
-        docker_ioc.stop()
-        LOG.info("Waiting for channels to go inactive")
-        assert wait_for_sync(
-            cf_client,
-            lambda cf_client: check_channel_property(cf_client, name=base_channel_name, prop=INACTIVE_PROPERTY),
-        )
-        docker_ioc.start()
+        # Act
+        restart_ioc(docker_ioc, cf_client, base_channel_name, "st_remove_infotag")
 
-        docker_exec_new_command(docker_ioc, "./demo /recsync/iocBoot/iocdemo/st_remove_infotag.cmd")
-        # Detach by not waiting for the thread to finish
-
-        LOG.debug("ioc1-1 restart")
-        assert wait_for_sync(cf_client, lambda cf_client: check_channel_property(cf_client, name=base_channel_name))
-        LOG.debug("ioc1-1 has restarted and synced")
-
+        # Assert
         base_channel = cf_client.find(name=base_channel_name)
         LOG.debug("archive channel: %s", base_channel)
         assert get_len_archive_properties(base_channel) == 0
