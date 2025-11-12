@@ -8,7 +8,13 @@ from testcontainers.compose import DockerCompose
 from docker import DockerClient
 from docker.models.containers import Container
 
-from .client_checks import INACTIVE_PROPERTY, check_channel_property, create_client_and_wait, wait_for_sync
+from .client_checks import (
+    BASE_IOC_CHANNEL_COUNT,
+    INACTIVE_PROPERTY,
+    check_channel_property,
+    create_client_and_wait,
+    wait_for_sync,
+)
 from .docker import ComposeFixtureFactory
 
 LOG: logging.Logger = logging.getLogger(__name__)
@@ -75,7 +81,7 @@ class TestRemoveInfoTag:
         # Arrange
         docker_ioc = start_ioc(setup_compose)
         LOG.info("Waiting for channels to sync")
-        cf_client = create_client_and_wait(setup_compose, expected_channel_count=8)
+        cf_client = create_client_and_wait(setup_compose, expected_channel_count=BASE_IOC_CHANNEL_COUNT)
 
         # Check before
         LOG.debug('Checking ioc1-1 has ai:base_record with info tag "archive"')

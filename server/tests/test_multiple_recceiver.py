@@ -5,15 +5,15 @@ import pytest
 from channelfinder import ChannelFinderClient
 from testcontainers.compose import DockerCompose
 
-from .client_checks import create_client_and_wait
+from .client_checks import BASE_IOC_CHANNEL_COUNT, create_client_and_wait
 from .docker import ComposeFixtureFactory
 
 LOG: logging.Logger = logging.getLogger(__name__)
 
 RECSYNC_RESTART_DELAY = 30
 # Number of channels expected in the default setup
-# 4 iocs, 6 channels per ioc (2 reccaster.db, 2 somerecords.db, 2 aliases in somerecords.db)
-EXPECTED_DEFAULT_CHANNEL_COUNT = 32
+IOC_COUNT = 4
+EXPECTED_DEFAULT_CHANNEL_COUNT = IOC_COUNT * BASE_IOC_CHANNEL_COUNT
 
 setup_compose = ComposeFixtureFactory(Path("docker") / Path("test-multi-recc.yml")).return_fixture()
 
