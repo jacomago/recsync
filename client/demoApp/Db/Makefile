@@ -11,8 +11,8 @@ include $(TOP)/configure/CONFIG
 # Create and install (or just install) into <top>/db
 # databases, templates, substitutions like this
 DB += somerecords.db
-DB += archive.db
-DB += archive_bugtest.db
+DB += test_base.db
+DB += test_remove_infotag.db
 #----------------------------------------------------
 # If <anyname>.db template is not named <anyname>*.template add
 # <anyname>_template = <templatename>
