@@ -13,7 +13,8 @@ MAX_WAIT_SECONDS = 180
 TIME_PERIOD_INCREMENT = 2
 
 # (2 reccaster.db, 2 somerecords.db, 2 aliases in somerecords.db, 2 in test_base.db)
-BASE_IOC_CHANNEL_COUNT = 2 + (2 + 2) + 2
+BASE_ALIAS_COUNT = 2
+BASE_IOC_CHANNEL_COUNT = 2 + 2 + 2 + BASE_ALIAS_COUNT
 
 
 def channel_match(channel0, channel1, properties_to_match: list[str]):
