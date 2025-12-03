@@ -7,7 +7,7 @@ import socket
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, override
 
 from channelfinder import ChannelFinderClient
 from requests import ConnectionError, RequestException
@@ -256,6 +256,7 @@ class CFProcessor(service.Service):
         self.current_time: Callable[[Optional[str]], str] = get_current_time
         self.lock: DeferredLock = DeferredLock()
 
+    @override
     def startService(self):
         """Start the CFProcessor service.
 
@@ -343,6 +344,7 @@ class CFProcessor(service.Service):
                 if self.cf_config.clean_on_start:
                     self.clean_service()
 
+    @override
     def stopService(self):
         """Stop the CFProcessor service.
 
