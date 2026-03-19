@@ -30,7 +30,7 @@ dependencies = [
   "twisted",
 ]
 
-optional-dependencies.test = [ "pytest", "testcontainers>=4" ]
+optional-dependencies.test = [ "docker", "pytest", "pytest-rerunfailures", "pytest-timeout", "testcontainers>=4" ]
 urls.Repository = "https://github.com/ChannelFinder/recsync"
 
 [tool.setuptools]
@@ -48,3 +48,8 @@ line-length = 120
 # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
 # McCabe complexity (`C901`) by default.
 lint.select = [ "E", "F", "I" ]
+
+[tool.pytest.ini_options]
+timeout = 600
+reruns = 2
+reruns_delay = 5

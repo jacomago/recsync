@@ -35,8 +35,8 @@ class ComposeFixtureFactory:
     def __init__(self, compose_file: Path) -> None:
         self.compose_file = compose_file
 
-    def return_fixture(self):
-        @pytest.fixture(scope="class")
+    def return_fixture(self, scope: str = "class"):
+        @pytest.fixture(scope=scope)
         def setup_compose() -> DockerCompose:
             LOG.info("Setup test environment")
             compose = test_compose(self.compose_file)

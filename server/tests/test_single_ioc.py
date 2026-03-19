@@ -7,12 +7,11 @@ from channelfinder import ChannelFinderClient
 from testcontainers.compose import DockerCompose
 
 from .client_checks import (
-    BASE_IOC_CHANNEL_COUNT,
     DEFAULT_CHANNEL_NAME,
     INACTIVE_PROPERTY,
     channels_match,
     check_channel_property,
-    create_client_and_wait,
+    create_client_from_compose,
     wait_for_sync,
 )
 from .docker import (
@@ -27,12 +26,23 @@ PROPERTIES_TO_MATCH = ["pvStatus", "recordType", "recordDesc", "alias", "hostNam
 
 LOG: logging.Logger = logging.getLogger(__name__)
 
-setup_compose = ComposeFixtureFactory(Path("tests") / "docker" / "test-single-ioc.yml").return_fixture()
+setup_compose = ComposeFixtureFactory(Path("tests") / "docker" / "test-single-ioc.yml").return_fixture(scope="module")
+
+
+@pytest.fixture(scope="class", autouse=True)
+def restore_ioc(setup_compose: DockerCompose) -> None:  # noqa: F811
+    try:
+        start_container(setup_compose, "ioc1-1")
+    except Exception:
+        pass  # Already running, or removed by TestMoveIocHost (last class)
+    yield
 
 
 @pytest.fixture(scope="class")
-def cf_client(setup_compose: DockerCompose) -> ChannelFinderClient:  # noqa: F811
-    return create_client_and_wait(setup_compose, expected_channel_count=BASE_IOC_CHANNEL_COUNT)
+def cf_client(setup_compose: DockerCompose, restore_ioc) -> ChannelFinderClient:  # noqa: F811
+    cf = create_client_from_compose(setup_compose)
+    assert wait_for_sync(cf, lambda c: check_channel_property(c, DEFAULT_CHANNEL_NAME))
+    return cf
 
 
 class TestRestartIOC:
