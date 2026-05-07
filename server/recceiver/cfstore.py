@@ -901,17 +901,21 @@ def get_existing_channels(
 
     # The list of pv's is searched keeping in mind the limitations on the URL length
     search_strings = []
-    search_string = ""
+    current_batch: List[str] = []
+    batch_len = 0
     for channel_name in new_channels:
-        if not search_string:
-            search_string = channel_name
-        elif len(search_string) + len(channel_name) < 600:
-            search_string = search_string + "|" + channel_name
+        if not current_batch:
+            current_batch.append(channel_name)
+            batch_len = len(channel_name)
+        elif batch_len + len(channel_name) < 600:
+            current_batch.append(channel_name)
+            batch_len += len(channel_name)
         else:
-            search_strings.append(search_string)
-            search_string = channel_name
-    if search_string:
-        search_strings.append(search_string)
+            search_strings.append("|".join(current_batch))
+            current_batch = [channel_name]
+            batch_len = len(channel_name)
+    if current_batch:
+        search_strings.append("|".join(current_batch))
 
     for each_search_string in search_strings:
         _log.debug("Find existing channels by name: %s", each_search_string)
