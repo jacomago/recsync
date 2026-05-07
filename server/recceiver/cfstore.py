@@ -1284,10 +1284,10 @@ def __merge_property_lists(
         channel: The channel.
         managed_properties: The managed properties
     """
-    new_property_names = [p.name for p in new_properties]
+    new_property_names = {p.name for p in new_properties}
     for old_property in channel.properties:
         if old_property.name not in new_property_names and (old_property.name not in managed_properties):
-            new_properties = new_properties + [old_property]
+            new_properties.append(old_property)
     return new_properties
 
 
