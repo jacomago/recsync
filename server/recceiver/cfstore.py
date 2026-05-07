@@ -24,7 +24,7 @@ from .processors import ConfigAdapter
 
 _log = logging.getLogger(__name__)
 
-__all__ = ["CFProcessor"]
+__all__ = ["CFProcessor", "CFUpdateAbortedError"]
 
 RECCEIVERID_DEFAULT = socket.gethostname()
 DEFAULT_MAX_CHANNEL_NAME_QUERY_LENGTH = 600
@@ -418,7 +418,21 @@ class CFProcessor(service.Service):
         port = transaction_record.source_address.port
         iocid = host + ":" + str(port)
         lock = self._get_ioc_lock(iocid)
-        return lock.run(self._commit_with_lock, transaction_record, iocid)
+        d = lock.run(self._commit_with_lock, transaction_record, iocid)
+        d.addBoth(self._prune_ioc_state, iocid)
+        return d
+
+    def _prune_ioc_state(self, result, iocid: str):
+        """Remove per-IOC lock and cancel flag once an IOC is fully gone.
+
+        Called after the per-IOC lock is released. Prunes only when no commit
+        is queued (lock free) and the IOC has left the known-IOC set.
+        """
+        lock = self._ioc_locks.get(iocid)
+        if lock is not None and not lock.locked and iocid not in self.iocs:
+            self._ioc_locks.pop(iocid, None)
+            self._cancelled.pop(iocid, None)
+        return result
 
     def _commit_with_lock(self, transaction: interfaces.ITransaction, iocid: str) -> defer.Deferred:
         """Commit a transaction to Channelfinder with per-IOC lock held.
@@ -446,18 +460,26 @@ class CFProcessor(service.Service):
         d.addCallback(wait_for_thread)
 
         def chain_error(err):
-            """Handle errors from the commit thread.
-
-            Note this is not foolproof as the thread may still be running.
-            """
-            if not err.check(defer.CancelledError):
-                _log.error("CF_COMMIT FAILURE: %s", err)
+            """Handle errors from the commit thread."""
             if self._cancelled.get(iocid, False):
+                # d is chained onto t via wait_for_thread; propagate through t.
                 if not err.check(defer.CancelledError):
+                    _log.error("CF_COMMIT FAILURE (cancelled): %s", err)
                     raise defer.CancelledError()
                 return err
-            else:
+            elif err.check(CFUpdateAbortedError):
+                # CF retries exhausted: log but treat as success so the
+                # disconnect commit (queued in recast.py) can still run.
+                _log.error("CF_COMMIT ABORTED after exhausting retries: %s", err)
                 d.callback(None)
+            elif err.check(defer.CancelledError):
+                # Service stopped while this commit was in-flight.
+                _log.info("CF_COMMIT cancelled (service stopped): %s", err)
+                d.errback(err)
+            else:
+                # Unexpected exception: surface it to the caller.
+                _log.error("CF_COMMIT FAILURE: %s", err)
+                d.errback(err)
 
         def chain_result(result):
             """Handle successful completion of the commit thread.
@@ -637,7 +659,7 @@ class CFProcessor(service.Service):
             self.update_ioc_infos(transaction, ioc_info, records_to_delete, record_info_by_name)
         poll_success = push_to_cf(_update_channelfinder, self, record_info_by_name, records_to_delete, ioc_info)
         if not poll_success:
-            raise defer.CancelledError(f"Failed to commit transaction after polling retries: {transaction}")
+            raise CFUpdateAbortedError(f"Failed to commit transaction after polling retries: {transaction}")
 
     def remove_channel(self, recordName: str, iocid: str) -> None:
         """Remove channel from self.iocs and self.channel_ioc_ids.
@@ -1123,6 +1145,10 @@ class IOCMissingInfoError(Exception):
         self.ioc_info = ioc_info
 
 
+class CFUpdateAbortedError(Exception):
+    """Raised when a CF update is abandoned after exhausting all retries."""
+
+
 def _update_channelfinder(
     processor: CFProcessor, record_info_by_name: Dict[str, RecordInfo], records_to_delete, ioc_info: IocInfo
 ) -> None:
@@ -1230,8 +1256,6 @@ def _update_channelfinder(
     else:
         if old_channels and len(old_channels) != 0:
             cf_set_chunked(client, channels, cf_config.cf_query_limit)
-    if processor.is_cancelled(iocid):
-        raise defer.CancelledError(f"Processor cancelled in _update_channelfinder for {ioc_info}")
 
 
 def cf_set_chunked(client: ChannelFinderClient, channels: List[CFChannel], chunk_size=DEFAULT_QUERY_LIMIT) -> None:

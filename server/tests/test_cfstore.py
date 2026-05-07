@@ -304,6 +304,71 @@ class TestPushToCfRetries(trial_unittest.TestCase):
         self.assertEqual(mock_update.call_count, 1)
 
 
+class TestCommitErrorHandling(trial_unittest.TestCase):
+    """Verify that _commit_with_lock surfaces errors correctly."""
+
+    timeout = 10
+
+    @defer.inlineCallbacks
+    def test_exhausted_retries_resolves_as_success(self):
+        """Exhausted CF retries must not errback the commit Deferred.
+
+        chain_error swallows CFUpdateAbortedError so that a queued disconnect
+        commit (chained in recast.py) can still run.
+        """
+        proc = make_started_processor()
+        proc.cf_config.push_max_retries = 1
+        proc.cf_config.push_always_retry = False
+        proc.client.findByArgs.side_effect = RequestException("CF down")
+
+        tx = make_transaction(port=5010)
+        result = yield proc.commit(tx)
+        self.assertIsNone(result)
+
+    @defer.inlineCallbacks
+    def test_unexpected_exception_errs_deferred(self):
+        """An unexpected exception from _update_channelfinder must errback the commit Deferred."""
+        proc = make_started_processor()
+        proc.client.findByArgs.side_effect = RuntimeError("unexpected")
+
+        tx = make_transaction(port=5011)
+        try:
+            yield proc.commit(tx)
+            self.fail("Expected an errback")
+        except RuntimeError as e:
+            self.assertIn("unexpected", str(e))
+
+    @defer.inlineCallbacks
+    def test_ioc_lock_pruned_after_disconnect(self):
+        """Per-IOC lock and cancel flag are pruned once an IOC leaves proc.iocs."""
+        proc = make_started_processor()
+        tx_connect = make_transaction(port=5012)
+        yield proc.commit(tx_connect)
+
+        iocid = "10.0.0.1:5012"
+        self.assertIn(iocid, proc._ioc_locks)
+
+        # Simulate disconnect: a connected=False transaction removes the IOC.
+        tx_disconnect = make_transaction(port=5012, initial=False, connected=False, records={})
+        yield proc.commit(tx_disconnect)
+
+        self.assertNotIn(iocid, proc._ioc_locks)
+        self.assertNotIn(iocid, proc._cancelled)
+
+    @defer.inlineCallbacks
+    def test_service_stopped_commit_errs_with_cancelled(self):
+        """Commits attempted after service stop must errback with CancelledError, not log as failure."""
+        proc = make_started_processor()
+        proc.running = 0  # simulate stopService without full teardown
+
+        tx = make_transaction(port=5013)
+        try:
+            yield proc.commit(tx)
+            self.fail("Expected CancelledError errback")
+        except defer.CancelledError:
+            pass  # expected — service stopped, not a bug
+
+
 class TestIocNotInListWarning(trial_unittest.TestCase):
     """Reproduce the 'did not send an initial transaction' production warning.
 

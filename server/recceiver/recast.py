@@ -273,7 +273,7 @@ class CollectionSession(object):
         _log.info("Close session from {ep}".format(ep=self.ep))
 
         # Do not cancel self.C here. Any data commit that is still queued
-        # behind the global lock must be allowed to complete so that channels
+        # behind the per-IOC lock must be allowed to complete so that channels
         # are registered as active in CF before the disconnect is processed.
         # The disconnect transaction is chained after self.C and will execute
         # once all preceding commits have finished.
@@ -298,11 +298,10 @@ class CollectionSession(object):
         def abort(err):
             if err.check(defer.CancelledError):
                 _log.info("Commit cancelled: {transaction}".format(transaction=transaction))
-                return err
             else:
                 _log.error("Commit failure: {err}".format(err=err))
                 self.proto.transport.loseConnection()
-                raise defer.CancelledError()
+            return None  # always continue the chain so disconnect commit runs
 
         self.C.addCallback(commit).addErrback(abort)
 
