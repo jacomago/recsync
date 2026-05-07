@@ -811,7 +811,7 @@ def handle_channel_old_and_new(
     new_channels: Set[str],
     cf_config: CFConfig,
     record_info_by_name: Dict[str, RecordInfo],
-    old_channels: List[CFChannel],
+    old_channels: Dict[str, CFChannel],
 ) -> None:
     """
     Channel exists in Channelfinder with same iocid.
@@ -923,7 +923,7 @@ def get_existing_channels(
 
 
 def handle_channels(
-    old_channels: List[CFChannel],
+    old_channels: Dict[str, CFChannel],
     new_channels: Set[str],
     records_to_delete: List[str],
     channel_ioc_ids: Dict[str, List[str]],
@@ -965,7 +965,7 @@ def handle_channels(
         iocid: The IOC ID.
         cf_config: The configuration for the processor.
     """
-    for cf_channel in old_channels:
+    for cf_channel in old_channels.values():
         if (
             not new_channels or cf_channel.name in records_to_delete
         ):  # case: empty commit/del, remove all reference to ioc
@@ -1136,10 +1136,10 @@ def _update_channelfinder(
     channels: List[CFChannel] = []
     # A list of channels in channelfinder with the associated hostName and iocName
     _log.debug("Find existing channels by IOCID: %s", ioc_info)
-    old_channels: List[CFChannel] = [
-        CFChannel.from_dict(ch)
+    old_channels: Dict[str, CFChannel] = {
+        ch["name"]: CFChannel.from_dict(ch)
         for ch in client.findByArgs(prepare_find_args(cf_config=cf_config, args=[("iocid", iocid)]))
-    ]
+    }
 
     if old_channels is not None:
         handle_channels(
