@@ -1202,11 +1202,8 @@ def _update_channelfinder(
             create_new_channel(channels, channel_name, ioc_info, new_properties, cf_config, record_info_by_name)
     _log.info("Total channels to update: %s for ioc: %s", len(channels), ioc_info)
 
-    if len(channels) != 0:
+    if channels:
         cf_set_chunked(client, channels, cf_config.cf_query_limit)
-    else:
-        if old_channels and len(old_channels) != 0:
-            cf_set_chunked(client, channels, cf_config.cf_query_limit)
     if processor.cancelled:
         raise defer.CancelledError(f"Processor cancelled in _update_channelfinder for {ioc_info}")
 
