@@ -1183,7 +1183,7 @@ def _update_channelfinder(
         ):
             new_properties.append(CFProperty.record_type(ioc_info.owner, record_info_by_name[channel_name].record_type))
         if channel_name in record_info_by_name:
-            new_properties = new_properties + record_info_by_name[channel_name].info_properties
+            new_properties.extend(record_info_by_name[channel_name].info_properties)
 
         if channel_name in existing_channels:
             _log.debug("update existing channel %s: exists but with a different iocid from %s", channel_name, iocid)
