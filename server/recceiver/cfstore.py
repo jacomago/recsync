@@ -4,6 +4,7 @@ import datetime
 import enum
 import logging
 import socket
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
@@ -274,7 +275,23 @@ class CFProcessor(service.Service):
         self.iocs: Dict[str, IocInfo] = dict()
         self.client: Optional[ChannelFinderClient] = None
         self.current_time: Callable[[Optional[str]], str] = get_current_time
-        self.lock: DeferredLock = DeferredLock()
+        self.lock: DeferredLock = DeferredLock()  # Global lock for start/stop lifecycle
+        self._ioc_locks: Dict[str, DeferredLock] = {}
+        self._state_lock = threading.Lock()
+        self._cancelled: Dict[str, bool] = {}
+
+    def _get_ioc_lock(self, iocid: str) -> DeferredLock:
+        """Get or create a DeferredLock for a specific IOC.
+
+        Called from the reactor thread only, so no synchronization needed.
+        """
+        if iocid not in self._ioc_locks:
+            self._ioc_locks[iocid] = DeferredLock()
+        return self._ioc_locks[iocid]
+
+    def is_cancelled(self, iocid: str) -> bool:
+        """Check if a commit for the given IOC has been cancelled, or if the processor has stopped."""
+        return self._cancelled.get(iocid, False) or not self.running
 
     def startService(self):
         """Start the CFProcessor service.
@@ -391,31 +408,39 @@ class CFProcessor(service.Service):
     def commit(self, transaction_record: interfaces.ITransaction) -> defer.Deferred:
         """Commit a transaction to Channelfinder.
 
+        Uses a per-IOC lock so that different IOCs can commit in parallel,
+        while transactions from the same IOC are serialized.
+
         Args:
             transaction_record: The transaction to commit.
         """
-        return self.lock.run(self._commit_with_lock, transaction_record)
+        host = transaction_record.source_address.host
+        port = transaction_record.source_address.port
+        iocid = host + ":" + str(port)
+        lock = self._get_ioc_lock(iocid)
+        return lock.run(self._commit_with_lock, transaction_record, iocid)
 
-    def _commit_with_lock(self, transaction: interfaces.ITransaction) -> defer.Deferred:
-        """Commit a transaction to Channelfinder with lock held.
+    def _commit_with_lock(self, transaction: interfaces.ITransaction, iocid: str) -> defer.Deferred:
+        """Commit a transaction to Channelfinder with per-IOC lock held.
 
         Args:
             transaction: The transaction to commit.
+            iocid: The IOC identifier (host:port).
         """
-        self.cancelled = False
+        self._cancelled[iocid] = False
 
-        t = deferToThread(self._commit_with_thread, transaction)
+        t = deferToThread(self._commit_with_thread, transaction, iocid)
 
         def cancel_commit(d: defer.Deferred):
             """Cancel the commit operation."""
-            self.cancelled = True
+            self._cancelled[iocid] = True
             d.callback(None)
 
         d: defer.Deferred = defer.Deferred(cancel_commit)
 
         def wait_for_thread(_ignored):
             """Wait for the commit thread to finish."""
-            if self.cancelled:
+            if self._cancelled.get(iocid, False):
                 return t
 
         d.addCallback(wait_for_thread)
@@ -427,7 +452,7 @@ class CFProcessor(service.Service):
             """
             if not err.check(defer.CancelledError):
                 _log.error("CF_COMMIT FAILURE: %s", err)
-            if self.cancelled:
+            if self._cancelled.get(iocid, False):
                 if not err.check(defer.CancelledError):
                     raise defer.CancelledError()
                 return err
@@ -439,7 +464,7 @@ class CFProcessor(service.Service):
 
             If the commit was cancelled, raise CancelledError.
             """
-            if self.cancelled:
+            if self._cancelled.get(iocid, False):
                 raise defer.CancelledError(f"CF Processor is cancelled, due to {result}")
             else:
                 d.callback(None)
@@ -551,18 +576,19 @@ class CFProcessor(service.Service):
                         for record_aliases in record_info_by_name[record_name].aliases:
                             self.remove_channel(record_aliases, iocid)
 
-    def _commit_with_thread(self, transaction: CommitTransaction):
+    def _commit_with_thread(self, transaction: CommitTransaction, iocid: str):
         """Commit the transaction to Channelfinder.
 
         Collects the ioc info from the transaction.
         Collects the record infos from the transaction.
         Collects the records to delete from the transaction.
         Calculates the records by names.
-        Updates the local IOC information.
+        Updates the local IOC information (under _state_lock).
         Polls Channelfinder with the required updates until it passes.
 
         Args:
             transaction: The transaction to commit.
+            iocid: The IOC identifier (host:port).
         """
         host = transaction.source_address.host
         port = transaction.source_address.port
@@ -607,7 +633,8 @@ class CFProcessor(service.Service):
         _log.debug("Delete records: %s", records_to_delete)
 
         record_info_by_name = CFProcessor.record_info_by_name(record_infos, ioc_info)
-        self.update_ioc_infos(transaction, ioc_info, records_to_delete, record_info_by_name)
+        with self._state_lock:
+            self.update_ioc_infos(transaction, ioc_info, records_to_delete, record_info_by_name)
         poll_success = push_to_cf(_update_channelfinder, self, record_info_by_name, records_to_delete, ioc_info)
         if not poll_success:
             raise defer.CancelledError(f"Failed to commit transaction after polling retries: {transaction}")
@@ -1130,7 +1157,7 @@ def _update_channelfinder(
     if ioc_info.hostname is None or ioc_info.ioc_name is None:
         raise IOCMissingInfoError(ioc_info)
 
-    if processor.cancelled:
+    if processor.is_cancelled(iocid):
         raise defer.CancelledError(f"Processor cancelled in _update_channelfinder for {ioc_info}")
 
     channels: List[CFChannel] = []
@@ -1159,7 +1186,7 @@ def _update_channelfinder(
     # now pvNames contains a list of pv's new on this host/ioc
     existing_channels = get_existing_channels(new_channels, client, cf_config)
 
-    if processor.cancelled:
+    if processor.is_cancelled(iocid):
         raise defer.CancelledError(f"CF Processor is cancelled, after fetching existing channels for {ioc_info}")
 
     for channel_name in new_channels:
@@ -1203,7 +1230,7 @@ def _update_channelfinder(
     else:
         if old_channels and len(old_channels) != 0:
             cf_set_chunked(client, channels, cf_config.cf_query_limit)
-    if processor.cancelled:
+    if processor.is_cancelled(iocid):
         raise defer.CancelledError(f"Processor cancelled in _update_channelfinder for {ioc_info}")
 
 
