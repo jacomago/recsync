@@ -384,11 +384,23 @@ Example — IOC-level, `RECID = 0`, `iocName = IOC-1`:
 | Server message id range | `MSG_ID >= 0x8000` |
 | Client message id range | `MSG_ID < 0x8000` |
 
+## Machine-readable schema
+
+[`schema/recsync.ksy`](schema/recsync.ksy) is a [Kaitai Struct] definition of the
+binary format: the TCP frame and the announce packet. It compiles to parsers in
+many languages and can be explored in the [Kaitai Web IDE]. Kaitai describes the
+structural decoding only; the semantic rules in this document (alias type
+omission, non-empty names and keys, the encode direction) are not expressed there.
+
+[Kaitai Struct]: https://kaitai.io/
+[Kaitai Web IDE]: https://ide.kaitai.io/
+
 ## Conformance
 
 The [`conformance/`](conformance/) directory contains `vectors.json`, a
 language-neutral set of golden encodings covering every message and the announce
 packet. Each entry pairs a logical message with its exact hex bytes. An
 implementation conforms if, for every entry, encoding the fields produces the
-given bytes and decoding the bytes reproduces the fields. See
+given bytes and decoding the bytes reproduces the fields. The Kaitai schema is
+itself checked against these vectors in CI. See
 [conformance/README.md](conformance/README.md).

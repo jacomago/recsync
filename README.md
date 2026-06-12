@@ -11,6 +11,8 @@ This repository is the home of the **protocol specification**.
 
 - **[SPEC.md](SPEC.md)** — the normative wire-protocol specification: transport,
   connection lifecycle, message framing, and every message format.
+- **[schema/recsync.ksy](schema/recsync.ksy)** — a [Kaitai Struct](https://kaitai.io/)
+  definition of the binary format, compilable to parsers in many languages.
 - **[conformance/](conformance/)** — language-neutral golden test vectors that
   any implementation can validate against.
 

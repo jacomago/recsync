@@ -53,3 +53,25 @@ PYTHONPATH=server python conformance/generate_vectors.py
 The committed `vectors.json` MUST be identical to the script's output, so a
 regeneration that produces a diff means the fixtures and the implementation have
 drifted.
+
+## Validating the Kaitai schema
+
+[`schema/recsync.ksy`](../schema/recsync.ksy) is checked against these vectors by
+[`test_kaitai.py`](test_kaitai.py): it parses each vector's bytes through the
+parser compiled from the schema and asserts the decoded fields match. The
+`conformance` GitHub workflow runs this on every change to `schema/`,
+`conformance/`, or the protocol implementation.
+
+To run it locally you need the [Kaitai Struct compiler] and the Python runtime:
+
+```bash
+# compiler: download the release zip (needs Java), or `brew install kaitai-struct-compiler`
+pip install kaitaistruct
+kaitai-struct-compiler --target python --outdir conformance/_generated schema/recsync.ksy
+python -m pytest conformance/test_kaitai.py -v
+```
+
+The generated parser lands in `conformance/_generated/` (git-ignored); the test
+skips if it has not been compiled.
+
+[Kaitai Struct compiler]: https://kaitai.io/#download
