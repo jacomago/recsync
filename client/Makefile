@@ -1,19 +1,10 @@
-#Makefile at top of application tree
-TOP = .
-include $(TOP)/configure/CONFIG
-DIRS := $(DIRS) configure
-DIRS := $(DIRS) castApp
-ifneq ($(SKIPDEMO),YES)
-DIRS := $(DIRS) demoApp
-endif
-DIRS := $(DIRS) iocBoot
 
-define DIR_template
- $(1)_DEPEND_DIRS = configure
-endef
-$(foreach dir, $(filter-out configure,$(DIRS)),$(eval $(call DIR_template,$(dir))))
-
-iocBoot_DEPEND_DIRS += $(filter %App,$(DIRS))
-demoApp_DEPEND_DIRS += castApp
-
-include $(TOP)/configure/RULES_TOP
+# reccaster has moved - https://github.com/ChannelFinder/recsync/pull/169
+all:
+	@echo ""
+	@echo "ERROR: The 'reccaster' module has been moved to its own repository."
+	@echo "  New location: https://github.com/channelfinder/reccaster"
+	@echo ""
+	@echo "  git clone https://github.com/channelfinder/reccaster"
+	@echo ""
+	@exit 1

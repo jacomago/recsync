@@ -1,7 +1,7 @@
 
 services:
   ioc1:
-    build: ../client
+    image: ghcr.io/channelfinder/reccaster:master
     environment:
       - IOCSH_NAME=IOC1
     tty: true

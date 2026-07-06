@@ -3,6 +3,10 @@ application.log
 # python
 .venv
 venv
+__pycache__/
+
+# generated kaitai parser (compiled from schema/recsync.ksy in CI)
+conformance/_generated/
 
 ## caches
 .*_cache

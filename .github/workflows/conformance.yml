@@ -1,0 +1,51 @@
+name: conformance
+
+on:
+  push:
+    branches: [ "*" ]
+    paths:
+      - schema/**
+      - conformance/**
+      - server/recceiver/protocol/**
+  pull_request:
+    branches: [ "master" ]
+    paths:
+      - schema/**
+      - conformance/**
+      - server/recceiver/protocol/**
+
+env:
+  KSC_VERSION: "0.10"
+
+jobs:
+  kaitai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Kaitai Struct compiler
+        run: |
+          curl -sSL -o ksc.zip \
+            "https://github.com/kaitai-io/kaitai_struct_compiler/releases/download/${KSC_VERSION}/kaitai-struct-compiler-${KSC_VERSION}.zip"
+          unzip -q ksc.zip
+          echo "$PWD/kaitai-struct-compiler-${KSC_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Install Kaitai runtime
+        run: python -m pip install kaitaistruct
+
+      - name: Compile schema
+        run: kaitai-struct-compiler --target python --outdir conformance/_generated schema/recsync.ksy
+
+      - name: Validate schema against golden vectors
+        run: python -m pytest conformance/test_kaitai.py -v

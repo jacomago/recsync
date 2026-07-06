@@ -1,0 +1,123 @@
+[
+  {
+    "name": "server_greeting",
+    "transport": "tcp",
+    "message": "ServerGreeting",
+    "msg_id": 32769,
+    "fields": {
+      "version": 0
+    },
+    "hex": "524380010000000100"
+  },
+  {
+    "name": "ping",
+    "transport": "tcp",
+    "message": "Ping",
+    "msg_id": 32770,
+    "fields": {
+      "nonce": 305419896
+    },
+    "hex": "524380020000000412345678"
+  },
+  {
+    "name": "client_greeting",
+    "transport": "tcp",
+    "message": "ClientGreeting",
+    "msg_id": 1,
+    "fields": {
+      "version": 3,
+      "client_type": 0,
+      "server_key": 3405705229
+    },
+    "hex": "524300010000000803000000cafef00d"
+  },
+  {
+    "name": "pong",
+    "transport": "tcp",
+    "message": "Pong",
+    "msg_id": 2,
+    "fields": {
+      "nonce": 305419896
+    },
+    "hex": "524300020000000412345678"
+  },
+  {
+    "name": "add_record",
+    "transport": "tcp",
+    "message": "AddRecord",
+    "msg_id": 3,
+    "fields": {
+      "record_id": 11,
+      "kind": 0,
+      "record_type": "ai",
+      "record_name": "IOC1:PV1"
+    },
+    "hex": "52430003000000120000000b000200086169494f43313a505631"
+  },
+  {
+    "name": "add_record_alias",
+    "transport": "tcp",
+    "message": "AddRecord",
+    "msg_id": 3,
+    "fields": {
+      "record_id": 11,
+      "kind": 1,
+      "record_type": "",
+      "record_name": "IOC1:PV1:ALIAS"
+    },
+    "hex": "52430003000000160000000b0100000e494f43313a5056313a414c494153"
+  },
+  {
+    "name": "del_record",
+    "transport": "tcp",
+    "message": "DelRecord",
+    "msg_id": 4,
+    "fields": {
+      "record_id": 11
+    },
+    "hex": "52430004000000040000000b"
+  },
+  {
+    "name": "upload_done",
+    "transport": "tcp",
+    "message": "UploadDone",
+    "msg_id": 5,
+    "fields": {},
+    "hex": "524300050000000400000000"
+  },
+  {
+    "name": "add_info_record",
+    "transport": "tcp",
+    "message": "AddInfo",
+    "msg_id": 6,
+    "fields": {
+      "record_id": 11,
+      "key": "alarm",
+      "value": "MAJOR"
+    },
+    "hex": "52430006000000120000000b05000005616c61726d4d414a4f52"
+  },
+  {
+    "name": "add_info_ioc",
+    "transport": "tcp",
+    "message": "AddInfo",
+    "msg_id": 6,
+    "fields": {
+      "record_id": 0,
+      "key": "iocName",
+      "value": "IOC-1"
+    },
+    "hex": "52430006000000140000000007000005696f634e616d65494f432d31"
+  },
+  {
+    "name": "announce",
+    "transport": "udp",
+    "message": "Announce",
+    "fields": {
+      "tcp_port": 1234,
+      "key": 3405705229,
+      "host": "127.0.0.1"
+    },
+    "hex": "524300007f00000104d20000cafef00d"
+  }
+]
